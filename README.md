@@ -1,3 +1,9 @@
+# Disclaimer
+
+This is not an officially supported Google product. This project is not
+eligible for the [Google Open Source Software Vulnerability Rewards
+Program](https://bughunters.google.com/open-source-security).
+
 # New Project Template
 
 This repository contains a template that can be used to seed a repository for a
