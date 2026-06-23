@@ -1,0 +1,130 @@
+syntax = "proto3";
+
+package varlet.v1;
+
+option go_package = "github.com/google/varlet/proto/v1;varletv1";
+
+import "google/protobuf/struct.proto";
+
+// Service managing Varlet topologies, variables, and dependencies.
+service VarletService {
+  // Namespaces
+  rpc RegisterNamespace(RegisterNamespaceRequest) returns (RegisterNamespaceResponse);
+  rpc GetNamespace(GetNamespaceRequest) returns (GetNamespaceResponse);
+  rpc SetNamespacePolicy(SetNamespacePolicyRequest) returns (SetNamespacePolicyResponse);
+
+  // Variables (Outputs)
+  rpc PutVariable(PutVariableRequest) returns (PutVariableResponse);
+  rpc DeleteVariable(DeleteVariableRequest) returns (DeleteVariableResponse);
+
+  // Dependencies (Inputs)
+  rpc RegisterConsumer(RegisterConsumerRequest) returns (RegisterConsumerResponse);
+  rpc DeregisterConsumer(DeregisterConsumerRequest) returns (DeregisterConsumerResponse);
+  rpc GetVariableValue(GetVariableValueRequest) returns (GetVariableValueResponse);
+
+  // Graph operations
+  rpc GetDependencyGraph(GetDependencyGraphRequest) returns (GetDependencyGraphResponse);
+}
+
+message RetentionPolicy {
+  int32 min_versions = 1;
+  int32 max_age_days = 2;
+}
+
+message RegisterNamespaceRequest {
+  string name = 1;
+  RetentionPolicy retention_policy = 2;
+  string run_webhook_url = 3;
+}
+
+message RegisterNamespaceResponse {
+  string name = 1;
+}
+
+message GetNamespaceRequest {
+  string name = 1;
+}
+
+message GetNamespaceResponse {
+  string name = 1;
+  repeated string allowed_consumers = 2; // Allowlist of consumer namespaces (supports wildcards)
+  RetentionPolicy retention_policy = 3;
+  string run_webhook_url = 4;
+}
+
+message PutVariableRequest {
+  string namespace = 1;
+  string name = 2;
+  google.protobuf.Value value = 3;
+  bool force_actuation = 4; // If true, force consumers to re-apply even if value is unchanged
+}
+
+message PutVariableResponse {
+  // Empty response indicating success
+}
+
+message DeleteVariableRequest {
+  string namespace = 1;
+  string name = 2;
+  bool force = 3; // If true, force deletion even if there are active consumers.
+}
+
+message DeleteVariableResponse {
+  // Empty response indicating success
+}
+
+message RegisterConsumerRequest {
+  string consumer_namespace = 1;
+  string source_namespace = 2;
+  string variable_name = 3;
+}
+
+message RegisterConsumerResponse {
+  google.protobuf.Value value = 1; // Returns the current value upon registration
+  int64 actuation_nonce = 2;       // Token to trigger downstream recreation
+}
+
+message DeregisterConsumerRequest {
+  string consumer_namespace = 1;
+  string source_namespace = 2;
+  string variable_name = 3;
+}
+
+message DeregisterConsumerResponse {
+  // Empty response indicating success
+}
+
+message GetVariableValueRequest {
+  string consumer_namespace = 1;
+  string source_namespace = 2;
+  string variable_name = 3;
+}
+
+message GetVariableValueResponse {
+  google.protobuf.Value value = 1;
+  int64 actuation_nonce = 2;
+}
+
+message SetNamespacePolicyRequest {
+  string namespace = 1;
+  repeated string allowed_consumers = 2;
+}
+
+message SetNamespacePolicyResponse {
+  // Empty response indicating success
+}
+
+message GetDependencyGraphRequest {
+  string namespace = 1; // Optional root namespace
+}
+
+message DependencyEdge {
+  string consumer_namespace = 1;
+  string source_namespace = 2;
+  string variable_name = 3;
+}
+
+message GetDependencyGraphResponse {
+  repeated string namespaces = 1;
+  repeated DependencyEdge edges = 2;
+}
