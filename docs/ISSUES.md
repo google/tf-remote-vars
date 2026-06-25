@@ -23,12 +23,12 @@ Enable basic namespace registration and validation.
     *   [x] Terraform `plan` fails with clear error if namespace does not exist.
 *   **Blocked by:** Slice 0
 
-### Slice 2: Exporting Variables (Outputs) with Versioning & Rich Types End-to-End
+### Slice 2: Exporting Variables (Outputs) with Versioning & Rich Types End-to-End [DONE]
 Enable writing variables of any Terraform type, storing history.
 *   **Tasks:**
-    *   **Backend:** Extend `Store` interface for Variables. Database table `variables` must use composite PK `(namespace, name, version)`.
-    *   **Backend:** Implement `PutVariable` to increment version on write. Support `force_actuation` (increments nonce even if value is same). Implement `DeleteVariable`.
-    *   **Provider:** Implement `varlet_output` resource. Serialize TF values to `google.protobuf.Value`. Support `force_actuation` attribute.
+    *   [x] **Backend:** Extend `Store` interface for Variables. Database table `variables` must use composite PK `(namespace, name, version)`.
+    *   [x] **Backend:** Implement `PutVariable` to increment version on write. Support `force_actuation` (increments nonce even if value is same). Implement `DeleteVariable`.
+    *   [x] **Provider:** Implement `varlet_output` resource. Serialize TF values to `google.protobuf.Value`. Support `force_actuation` attribute.
 *   **Acceptance Criteria:**
     *   Applying `varlet_output` with a map or list successfully writes it to DB.
     *   Updating the variable creates a new row with incremented version.

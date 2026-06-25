@@ -7,6 +7,9 @@ import (
 	pb "github.com/google/varlet/proto/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // Server implements the VarletService gRPC server.
@@ -58,3 +61,75 @@ func (s *Server) GetNamespace(ctx context.Context, req *pb.GetNamespaceRequest) 
 		// ponytail: only name is returned for now, other fields will be added in Slice 4.
 	}, nil
 }
+
+// PutVariable stores a new variable version.
+func (s *Server) PutVariable(ctx context.Context, req *pb.PutVariableRequest) (*pb.PutVariableResponse, error) {
+	if req.GetNamespace() == "" {
+		return nil, status.Error(codes.InvalidArgument, "namespace cannot be empty")
+	}
+	if req.GetName() == "" {
+		return nil, status.Error(codes.InvalidArgument, "name cannot be empty")
+	}
+	if req.GetValue() == nil {
+		return nil, status.Error(codes.InvalidArgument, "value cannot be nil")
+	}
+
+	latest, err := s.store.GetLatestVariable(ctx, req.GetNamespace(), req.GetName())
+	isNotFound := errors.Is(err, ErrNotFound)
+	if err != nil && !isNotFound {
+		return nil, status.Errorf(codes.Internal, "failed to get latest variable: %v", err)
+	}
+
+	newValueBytes, err := protojson.Marshal(req.GetValue())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to marshal value: %v", err)
+	}
+
+	var version int64 = 1
+	shouldWrite := false
+
+	if isNotFound {
+		shouldWrite = true
+	} else {
+		var oldVal structpb.Value
+		if err := protojson.Unmarshal(latest.Value, &oldVal); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to unmarshal old value: %v", err)
+		}
+
+		if !proto.Equal(req.GetValue(), &oldVal) || req.GetForceActuation() {
+			version = latest.Version + 1
+			shouldWrite = true
+		}
+	}
+
+	if shouldWrite {
+		v := &Variable{
+			Namespace: req.GetNamespace(),
+			Name:      req.GetName(),
+			Version:   version,
+			Value:     newValueBytes,
+		}
+		if err := s.store.PutVariable(ctx, v); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to store variable: %v", err)
+		}
+	}
+
+	return &pb.PutVariableResponse{}, nil
+}
+
+// DeleteVariable deletes a variable.
+func (s *Server) DeleteVariable(ctx context.Context, req *pb.DeleteVariableRequest) (*pb.DeleteVariableResponse, error) {
+	if req.GetNamespace() == "" {
+		return nil, status.Error(codes.InvalidArgument, "namespace cannot be empty")
+	}
+	if req.GetName() == "" {
+		return nil, status.Error(codes.InvalidArgument, "name cannot be empty")
+	}
+
+	if err := s.store.DeleteVariable(ctx, req.GetNamespace(), req.GetName()); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to delete variable: %v", err)
+	}
+
+	return &pb.DeleteVariableResponse{}, nil
+}
+
