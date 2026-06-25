@@ -59,6 +59,7 @@ func (r *OutputResource) Schema(ctx context.Context, req resource.SchemaRequest,
 				Optional:            true,
 				Computed:            true,
 				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
@@ -124,28 +125,8 @@ func (r *OutputResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 	data.Namespace = types.StringValue(ns)
 
-	// Convert value to proto
-	pbVal, err := r.convDynamicToProto(ctx, data.Value)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Failed to convert value",
-			fmt.Sprintf("Could not convert value to proto: %s", err.Error()),
-		)
-		return
-	}
-
-	// Call backend
-	_, err = r.client.PutVariable(ctx, &pb.PutVariableRequest{
-		Namespace:      ns,
-		Name:           data.Name.ValueString(),
-		Value:          pbVal,
-		ForceActuation: data.ForceActuation.ValueBool(),
-	})
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Failed to store variable",
-			fmt.Sprintf("Could not store variable: %s", err.Error()),
-		)
+	if err := r.putVariable(ctx, ns, data.Name.ValueString(), data.Value, data.ForceActuation.ValueBool()); err != nil {
+		resp.Diagnostics.AddError("Failed to store variable", err.Error())
 		return
 	}
 
@@ -179,33 +160,31 @@ func (r *OutputResource) Update(ctx context.Context, req resource.UpdateRequest,
 		return
 	}
 
-	// Convert value to proto
-	pbVal, err := r.convDynamicToProto(ctx, data.Value)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Failed to convert value",
-			fmt.Sprintf("Could not convert value to proto: %s", err.Error()),
-		)
-		return
-	}
-
-	// Call backend (PutVariable handles updates/versioning)
-	_, err = r.client.PutVariable(ctx, &pb.PutVariableRequest{
-		Namespace:      data.Namespace.ValueString(),
-		Name:           data.Name.ValueString(),
-		Value:          pbVal,
-		ForceActuation: data.ForceActuation.ValueBool(),
-	})
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Failed to update variable",
-			fmt.Sprintf("Could not update variable: %s", err.Error()),
-		)
+	if err := r.putVariable(ctx, data.Namespace.ValueString(), data.Name.ValueString(), data.Value, data.ForceActuation.ValueBool()); err != nil {
+		resp.Diagnostics.AddError("Failed to update variable", err.Error())
 		return
 	}
 
 	// Save data into Terraform state
 	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+}
+
+func (r *OutputResource) putVariable(ctx context.Context, ns, name string, value types.Dynamic, force bool) error {
+	pbVal, err := r.convDynamicToProto(ctx, value)
+	if err != nil {
+		return fmt.Errorf("failed to convert value: %w", err)
+	}
+
+	_, err = r.client.PutVariable(ctx, &pb.PutVariableRequest{
+		Namespace:      ns,
+		Name:           name,
+		Value:          pbVal,
+		ForceActuation: force,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to store variable: %w", err)
+	}
+	return nil
 }
 
 func (r *OutputResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
@@ -277,11 +256,11 @@ func (r *OutputResource) convValue(tv tftypes.Value) (*structpb.Value, error) {
 		return structpb.NewNumberValue(f64), nil
 	}
 
-	switch t := typ.(type) {
-	case tftypes.List:
+	switch typ.(type) {
+	case tftypes.List, tftypes.Tuple:
 		var vals []tftypes.Value
 		if err := tv.As(&vals); err != nil {
-			return nil, fmt.Errorf("failed to decode list: %w", err)
+			return nil, fmt.Errorf("failed to decode collection: %w", err)
 		}
 		pbVals := make([]*structpb.Value, len(vals))
 		for i, val := range vals {
@@ -292,38 +271,10 @@ func (r *OutputResource) convValue(tv tftypes.Value) (*structpb.Value, error) {
 			pbVals[i] = pv
 		}
 		return structpb.NewListValue(&structpb.ListValue{Values: pbVals}), nil
-	case tftypes.Tuple:
-		var vals []tftypes.Value
-		if err := tv.As(&vals); err != nil {
-			return nil, fmt.Errorf("failed to decode tuple: %w", err)
-		}
-		pbVals := make([]*structpb.Value, len(vals))
-		for i, val := range vals {
-			pv, err := r.convValue(val)
-			if err != nil {
-				return nil, err
-			}
-			pbVals[i] = pv
-		}
-		return structpb.NewListValue(&structpb.ListValue{Values: pbVals}), nil
-	case tftypes.Map:
+	case tftypes.Map, tftypes.Object:
 		var vals map[string]tftypes.Value
 		if err := tv.As(&vals); err != nil {
-			return nil, fmt.Errorf("failed to decode map: %w", err)
-		}
-		fields := make(map[string]*structpb.Value)
-		for k, val := range vals {
-			pv, err := r.convValue(val)
-			if err != nil {
-				return nil, err
-			}
-			fields[k] = pv
-		}
-		return structpb.NewStructValue(&structpb.Struct{Fields: fields}), nil
-	case tftypes.Object:
-		var vals map[string]tftypes.Value
-		if err := tv.As(&vals); err != nil {
-			return nil, fmt.Errorf("failed to decode object: %w", err)
+			return nil, fmt.Errorf("failed to decode collection: %w", err)
 		}
 		fields := make(map[string]*structpb.Value)
 		for k, val := range vals {
@@ -335,6 +286,6 @@ func (r *OutputResource) convValue(tv tftypes.Value) (*structpb.Value, error) {
 		}
 		return structpb.NewStructValue(&structpb.Struct{Fields: fields}), nil
 	default:
-		return nil, fmt.Errorf("unsupported type: %s", t.String())
+		return nil, fmt.Errorf("unsupported type: %s", typ.String())
 	}
 }

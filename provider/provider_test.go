@@ -3,6 +3,7 @@ package provider
 import (
 	"fmt"
 	"net"
+	"path/filepath"
 	"regexp"
 	"testing"
 
@@ -28,7 +29,10 @@ func startTestServer(t *testing.T) (string, backend.Store) {
 		t.Fatalf("failed to listen: %v", err)
 	}
 
-	store, err := backend.NewSQLiteStore(":memory:")
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "varlet.db")
+
+	store, err := backend.NewSQLiteStore(dbPath)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
