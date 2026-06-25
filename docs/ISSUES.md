@@ -4,23 +4,23 @@ This document breaks down the implementation of Varlet into vertical slices (tra
 
 ## Slices Breakdown
 
-### Slice 0: Project Scaffolding & Code Gen
+### Slice 0: Project Scaffolding & Code Gen [DONE]
 Setup the basic project structure and generate Go code from the proto definition.
 *   **Tasks:**
-    *   Initialize Go module (`github.com/google/varlet`).
-    *   Verify proto compilation and generate Go gRPC stubs from `proto/v1/varlet.proto`.
+    *   [x] Initialize Go module (`github.com/google/varlet`).
+    *   [x] Verify proto compilation and generate Go gRPC stubs from `proto/v1/varlet.proto`.
 *   **Acceptance Criteria:**
-    *   Go code generates successfully without errors.
+    *   [x] Go code generates successfully without errors.
 *   **Blocked by:** None
 
-### Slice 1: Namespace (Basic) End-to-End
+### Slice 1: Namespace (Basic) End-to-End [DONE]
 Enable basic namespace registration and validation.
 *   **Tasks:**
-    *   **Backend:** Define `Store` interface for Namespace. Implement SQLite store for namespaces. Implement `RegisterNamespace` and `GetNamespace` gRPC handlers.
-    *   **Provider:** Create Terraform provider scaffolding. Implement `varlet_namespace` data source.
+    *   [x] **Backend:** Define `Store` interface for Namespace. Implement SQLite store for namespaces. Implement `RegisterNamespace` and `GetNamespace` gRPC handlers.
+    *   [x] **Provider:** Create Terraform provider scaffolding. Implement `varlet_namespace` data source.
 *   **Acceptance Criteria:**
-    *   Terraform `plan` succeeds when referencing an existing namespace via `data "varlet_namespace"`.
-    *   Terraform `plan` fails with clear error if namespace does not exist.
+    *   [x] Terraform `plan` succeeds when referencing an existing namespace via `data "varlet_namespace"`.
+    *   [x] Terraform `plan` fails with clear error if namespace does not exist.
 *   **Blocked by:** Slice 0
 
 ### Slice 2: Exporting Variables (Outputs) with Versioning & Rich Types End-to-End
