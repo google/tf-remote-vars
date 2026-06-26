@@ -111,5 +111,6 @@ func (p *VarletProvider) Resources(ctx context.Context) []func() resource.Resour
 	return []func() resource.Resource{
 		NewOutputResource,
 		NewInputResource,
+		NewNamespaceResource,
 	}
 }

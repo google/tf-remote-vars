@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -14,7 +15,11 @@ var ErrNotFound = errors.New("not found")
 
 // Namespace represents a namespace in Varlet.
 type Namespace struct {
-	Name string
+	Name                       string
+	RunWebhookURL              string
+	RetentionPolicyMinVersions int32
+	RetentionPolicyMaxAgeDays  int32
+	AllowedConsumers           []string
 }
 
 // Variable represents a variable version in Varlet.
@@ -23,17 +28,20 @@ type Variable struct {
 	Name      string
 	Version   int64
 	Value     []byte // Serialized google.protobuf.Value (JSON)
+	CreatedAt time.Time
 }
 
 // Store defines the interface for data persistence.
 type Store interface {
 	RegisterNamespace(ctx context.Context, ns *Namespace) error
 	GetNamespace(ctx context.Context, name string) (*Namespace, error)
+	SetNamespacePolicy(ctx context.Context, namespace string, allowedConsumers []string) error
 
 	// Variables
 	PutVariable(ctx context.Context, v *Variable) error
 	GetLatestVariable(ctx context.Context, namespace, name string) (*Variable, error)
 	DeleteVariable(ctx context.Context, namespace, name string) error
+	PruneVariables(ctx context.Context, namespace, name string, minVersions int32, cutoff time.Time) error
 
 	// Dependencies
 	RegisterConsumer(ctx context.Context, consumerNS, sourceNS, varName string) error
@@ -72,16 +80,25 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	}
 
 	// Create tables if they don't exist.
-	// ponytail: only name column for now, will add retention and webhook in Slice 4.
 	query := `
 	CREATE TABLE IF NOT EXISTS namespaces (
-		name TEXT PRIMARY KEY
+		name TEXT PRIMARY KEY,
+		run_webhook_url TEXT,
+		retention_policy_min_versions INTEGER,
+		retention_policy_max_age_days INTEGER
+	);
+	CREATE TABLE IF NOT EXISTS namespace_policies (
+		namespace TEXT,
+		allowed_consumer TEXT,
+		PRIMARY KEY (namespace, allowed_consumer),
+		FOREIGN KEY (namespace) REFERENCES namespaces(name) ON DELETE CASCADE
 	);
 	CREATE TABLE IF NOT EXISTS variables (
 		namespace TEXT,
 		name TEXT,
 		version INTEGER,
 		value BLOB,
+		created_at DATETIME,
 		PRIMARY KEY (namespace, name, version),
 		FOREIGN KEY (namespace) REFERENCES namespaces(name) ON DELETE CASCADE
 	);
@@ -103,7 +120,13 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 
 // RegisterNamespace registers a new namespace.
 func (s *SQLiteStore) RegisterNamespace(ctx context.Context, ns *Namespace) error {
-	_, err := s.db.ExecContext(ctx, "INSERT INTO namespaces (name) VALUES (?)", ns.Name)
+	query := `INSERT INTO namespaces (name, run_webhook_url, retention_policy_min_versions, retention_policy_max_age_days) 
+              VALUES (?, ?, ?, ?)
+              ON CONFLICT(name) DO UPDATE SET
+                  run_webhook_url = excluded.run_webhook_url,
+                  retention_policy_min_versions = excluded.retention_policy_min_versions,
+                  retention_policy_max_age_days = excluded.retention_policy_max_age_days`
+	_, err := s.db.ExecContext(ctx, query, ns.Name, ns.RunWebhookURL, ns.RetentionPolicyMinVersions, ns.RetentionPolicyMaxAgeDays)
 	if err != nil {
 		return fmt.Errorf("failed to register namespace: %w", err)
 	}
@@ -112,22 +135,41 @@ func (s *SQLiteStore) RegisterNamespace(ctx context.Context, ns *Namespace) erro
 
 // GetNamespace retrieves a namespace by name.
 func (s *SQLiteStore) GetNamespace(ctx context.Context, name string) (*Namespace, error) {
-	row := s.db.QueryRowContext(ctx, "SELECT name FROM namespaces WHERE name = ?", name)
+	row := s.db.QueryRowContext(ctx, "SELECT name, run_webhook_url, retention_policy_min_versions, retention_policy_max_age_days FROM namespaces WHERE name = ?", name)
 	var ns Namespace
-	err := row.Scan(&ns.Name)
+	err := row.Scan(&ns.Name, &ns.RunWebhookURL, &ns.RetentionPolicyMinVersions, &ns.RetentionPolicyMaxAgeDays)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to get namespace: %w", err)
 	}
+
+	// Query policies
+	rows, err := s.db.QueryContext(ctx, "SELECT allowed_consumer FROM namespace_policies WHERE namespace = ?", name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get namespace policies: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var consumer string
+		if err := rows.Scan(&consumer); err != nil {
+			return nil, fmt.Errorf("failed to scan allowed consumer: %w", err)
+		}
+		ns.AllowedConsumers = append(ns.AllowedConsumers, consumer)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
 	return &ns, nil
 }
 
 // PutVariable stores a new variable version.
 func (s *SQLiteStore) PutVariable(ctx context.Context, v *Variable) error {
-	query := `INSERT INTO variables (namespace, name, version, value) VALUES (?, ?, ?, ?)`
-	_, err := s.db.ExecContext(ctx, query, v.Namespace, v.Name, v.Version, v.Value)
+	query := `INSERT INTO variables (namespace, name, version, value, created_at) VALUES (?, ?, ?, ?, ?)`
+	_, err := s.db.ExecContext(ctx, query, v.Namespace, v.Name, v.Version, v.Value, v.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to put variable: %w", err)
 	}
@@ -136,12 +178,12 @@ func (s *SQLiteStore) PutVariable(ctx context.Context, v *Variable) error {
 
 // GetLatestVariable retrieves the latest version of a variable.
 func (s *SQLiteStore) GetLatestVariable(ctx context.Context, namespace, name string) (*Variable, error) {
-	query := `SELECT namespace, name, version, value FROM variables 
+	query := `SELECT namespace, name, version, value, created_at FROM variables 
               WHERE namespace = ? AND name = ? 
               ORDER BY version DESC LIMIT 1`
 	row := s.db.QueryRowContext(ctx, query, namespace, name)
 	var v Variable
-	err := row.Scan(&v.Namespace, &v.Name, &v.Version, &v.Value)
+	err := row.Scan(&v.Namespace, &v.Name, &v.Version, &v.Value, &v.CreatedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -230,5 +272,54 @@ func (s *SQLiteStore) GetDependencies(ctx context.Context, consumerNS string) ([
 		return nil, fmt.Errorf("rows error: %w", err)
 	}
 	return deps, nil
+}
+
+func (s *SQLiteStore) SetNamespacePolicy(ctx context.Context, namespace string, allowedConsumers []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, "DELETE FROM namespace_policies WHERE namespace = ?", namespace)
+	if err != nil {
+		return fmt.Errorf("failed to clear old policies: %w", err)
+	}
+
+	for _, consumer := range allowedConsumers {
+		_, err = tx.ExecContext(ctx, "INSERT INTO namespace_policies (namespace, allowed_consumer) VALUES (?, ?)", namespace, consumer)
+		if err != nil {
+			return fmt.Errorf("failed to insert policy: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *SQLiteStore) PruneVariables(ctx context.Context, namespace, name string, minVersions int32, cutoff time.Time) error {
+	if minVersions > 0 {
+		query := `DELETE FROM variables
+			WHERE namespace = ? AND name = ?
+			  AND created_at < ?
+			  AND version NOT IN (
+				  SELECT version FROM variables
+				  WHERE namespace = ? AND name = ?
+				  ORDER BY version DESC
+				  LIMIT ?
+			  )`
+		_, err := s.db.ExecContext(ctx, query, namespace, name, cutoff, namespace, name, minVersions)
+		if err != nil {
+			return fmt.Errorf("failed to prune variables: %w", err)
+		}
+	} else {
+		query := `DELETE FROM variables
+			WHERE namespace = ? AND name = ?
+			  AND created_at < ?`
+		_, err := s.db.ExecContext(ctx, query, namespace, name, cutoff)
+		if err != nil {
+			return fmt.Errorf("failed to prune variables: %w", err)
+		}
+	}
+	return nil
 }
 
