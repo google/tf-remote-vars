@@ -396,3 +396,89 @@ func (s *Server) checkAccess(ctx context.Context, consumerNS, sourceNS string) e
 	return status.Errorf(codes.PermissionDenied, "namespace %q is not allowed to consume from %q", consumerNS, sourceNS)
 }
 
+// GetDependencyGraph returns the dependency graph, optionally filtered by a root namespace.
+func (s *Server) GetDependencyGraph(ctx context.Context, req *pb.GetDependencyGraphRequest) (*pb.GetDependencyGraphResponse, error) {
+	rootNS := req.GetNamespace()
+
+	allNS, err := s.store.GetNamespaces(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get namespaces: %v", err)
+	}
+
+	allDeps, err := s.store.GetAllDependencies(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get dependencies: %v", err)
+	}
+
+	if rootNS == "" {
+		respEdges := make([]*pb.DependencyEdge, len(allDeps))
+		for i, d := range allDeps {
+			respEdges[i] = &pb.DependencyEdge{
+				ConsumerNamespace: d.Consumer,
+				SourceNamespace:   d.Source,
+				VariableName:     d.Variable,
+			}
+		}
+		return &pb.GetDependencyGraphResponse{
+			Namespaces: allNS,
+			Edges:      respEdges,
+		}, nil
+	}
+
+	foundRoot := false
+	for _, ns := range allNS {
+		if ns == rootNS {
+			foundRoot = true
+			break
+		}
+	}
+	if !foundRoot {
+		return nil, status.Errorf(codes.NotFound, "root namespace %q not found", rootNS)
+	}
+
+	// Upstream traversal (ancestors)
+	adj := make(map[string][]string)
+	for _, d := range allDeps {
+		adj[d.Consumer] = append(adj[d.Consumer], d.Source)
+	}
+
+	visited := make(map[string]bool)
+	queue := []string{rootNS}
+	visited[rootNS] = true
+
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+
+		for _, source := range adj[curr] {
+			if !visited[source] {
+				visited[source] = true
+				queue = append(queue, source)
+			}
+		}
+	}
+
+	var respNS []string
+	for _, ns := range allNS {
+		if visited[ns] {
+			respNS = append(respNS, ns)
+		}
+	}
+
+	var respEdges []*pb.DependencyEdge
+	for _, d := range allDeps {
+		if visited[d.Consumer] {
+			respEdges = append(respEdges, &pb.DependencyEdge{
+				ConsumerNamespace: d.Consumer,
+				SourceNamespace:   d.Source,
+				VariableName:     d.Variable,
+			})
+		}
+	}
+
+	return &pb.GetDependencyGraphResponse{
+		Namespaces: respNS,
+		Edges:      respEdges,
+	}, nil
+}
+
