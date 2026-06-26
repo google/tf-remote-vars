@@ -1,9 +1,14 @@
 package backend
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"log"
+	"net/http"
 	"path"
+	"time"
 
 	pb "github.com/google/varlet/proto/v1"
 	"github.com/jonboulle/clockwork"
@@ -13,6 +18,10 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+var webhookClient = &http.Client{
+	Timeout: 5 * time.Second,
+}
 
 // Server implements the VarletService gRPC server.
 type Server struct {
@@ -153,6 +162,11 @@ func (s *Server) PutVariable(ctx context.Context, req *pb.PutVariableRequest) (*
 			if err := s.store.PruneVariables(ctx, v.Namespace, v.Name, ns.RetentionPolicyMinVersions, cutoff); err != nil {
 				return nil, status.Errorf(codes.Internal, "failed to enforce retention policy: %v", err)
 			}
+		}
+		// Trigger downstream webhooks if there are consumers
+		hasCons, err := s.store.HasConsumers(ctx, v.Namespace, v.Name)
+		if err == nil && hasCons {
+			go s.propagateChange(context.Background(), v.Namespace, v.Name)
 		}
 	}
 
@@ -480,5 +494,62 @@ func (s *Server) GetDependencyGraph(ctx context.Context, req *pb.GetDependencyGr
 		Namespaces: respNS,
 		Edges:      respEdges,
 	}, nil
+}
+
+func (s *Server) propagateChange(ctx context.Context, sourceNS, varName string) {
+	consumers, err := s.store.GetConsumers(ctx, sourceNS, varName)
+	if err != nil {
+		log.Printf("[ERROR] failed to get consumers for %s/%s: %v", sourceNS, varName, err)
+		return
+	}
+
+	for _, consumerNS := range consumers {
+		ns, err := s.store.GetNamespace(ctx, consumerNS)
+		if err != nil {
+			log.Printf("[ERROR] failed to get namespace %s for webhook: %v", consumerNS, err)
+			continue
+		}
+		if ns.RunWebhookURL == "" {
+			continue
+		}
+
+		go s.callWebhook(ctx, ns.RunWebhookURL, consumerNS, sourceNS, varName)
+	}
+}
+
+func (s *Server) callWebhook(ctx context.Context, url, consumerNS, sourceNS, varName string) {
+	payload := struct {
+		ConsumerNamespace string `json:"consumer_namespace"`
+		SourceNamespace   string `json:"source_namespace"`
+		VariableName     string `json:"variable_name"`
+	}{
+		ConsumerNamespace: consumerNS,
+		SourceNamespace:   sourceNS,
+		VariableName:     varName,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("[ERROR] failed to marshal webhook payload: %v", err)
+		return
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	if err != nil {
+		log.Printf("[ERROR] failed to create webhook request: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := webhookClient.Do(req)
+	if err != nil {
+		log.Printf("[ERROR] webhook call to %s failed: %v", url, err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.Printf("[WARNING] webhook call to %s returned status %d", url, resp.StatusCode)
+	}
 }
 

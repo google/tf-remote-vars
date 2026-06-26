@@ -57,6 +57,7 @@ type Store interface {
 	IsConsumer(ctx context.Context, consumerNS, sourceNS, varName string) (bool, error)
 	HasConsumers(ctx context.Context, sourceNS, varName string) (bool, error)
 	GetDependencies(ctx context.Context, consumerNS string) ([]string, error)
+	GetConsumers(ctx context.Context, sourceNS, varName string) ([]string, error)
 	GetAllDependencies(ctx context.Context) ([]*Dependency, error)
 
 	Close() error
@@ -368,5 +369,28 @@ func (s *SQLiteStore) GetAllDependencies(ctx context.Context) ([]*Dependency, er
 		deps = append(deps, &dep)
 	}
 	return deps, nil
+}
+
+// GetConsumers returns all consumer namespaces for a given source namespace and variable name.
+func (s *SQLiteStore) GetConsumers(ctx context.Context, sourceNS, varName string) ([]string, error) {
+	query := `SELECT DISTINCT consumer_namespace FROM dependencies WHERE source_namespace = ? AND variable_name = ?`
+	rows, err := s.db.QueryContext(ctx, query, sourceNS, varName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get consumers: %w", err)
+	}
+	defer rows.Close()
+
+	var consumers []string
+	for rows.Next() {
+		var consumer string
+		if err := rows.Scan(&consumer); err != nil {
+			return nil, fmt.Errorf("failed to scan consumer: %w", err)
+		}
+		consumers = append(consumers, consumer)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+	return consumers, nil
 }
 

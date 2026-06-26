@@ -64,12 +64,12 @@ Expose the dependency graph for visualization.
 *   Tasks:
     *   [x] **Backend:** Implement `GetDependencyGraph` gRPC handler. Query the `dependencies` table to construct the nodes and edges of the graph.
 
-### Slice 6: Change Propagation (Actuation Webhooks)
+### Slice 6: Change Propagation (Actuation Webhooks) [DONE]
 Automatically trigger downstream stack runs when dependencies change.
-*   **Tasks:**
-    *   **Backend:** Implement webhook caller client.
-    *   **Backend:** When a variable changes (regular write or forced via `force_actuation`), query `dependencies` to find all consumer namespaces.
-    *   **Backend:** For each consumer, if `run_webhook_url` is configured, send an HTTP POST request to trigger the run.
+*   Tasks:
+    *   [x] **Backend:** Implement webhook caller client.
+    *   [x] **Backend:** When a variable changes (regular write or forced via `force_actuation`), query `dependencies` to find all consumer namespaces.
+    *   [x] **Backend:** For each consumer, if `run_webhook_url` is configured, send an HTTP POST request to trigger the run.
 *   **Acceptance Criteria:**
     *   Stack B configures `run_webhook_url` pointing to a local test HTTP server.
     *   Stack A updates a variable.
