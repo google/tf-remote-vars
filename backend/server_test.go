@@ -3,6 +3,7 @@ package backend
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,7 +11,10 @@ import (
 
 	pb "github.com/google/varlet/proto/v1"
 	"github.com/jonboulle/clockwork"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -1276,6 +1280,120 @@ func TestWebhookPropagation(t *testing.T) {
 		t.Errorf("received extra unexpected event: %+v", event)
 	default:
 		// OK
+	}
+}
+
+func TestAuditInterceptor(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	clock := clockwork.NewFakeClockAt(time.Date(2026, 6, 26, 12, 0, 0, 0, time.UTC))
+
+	// Start a real gRPC server on a local port
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer lis.Close()
+
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(AuditInterceptor(store, clock)),
+	)
+	server := NewServerWithClock(store, clock)
+	pb.RegisterVarletServiceServer(grpcServer, server)
+
+	go func() {
+		_ = grpcServer.Serve(lis)
+	}()
+	defer grpcServer.GracefulStop()
+
+	// Create client
+	conn, err := grpc.Dial(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("failed to dial: %v", err)
+	}
+	defer conn.Close()
+	client := pb.NewVarletServiceClient(conn)
+
+	// 1. Call RegisterNamespace with actor metadata
+	nsCtx := metadata.NewOutgoingContext(ctx, metadata.Pairs("x-actor", "alice"))
+	_, err = client.RegisterNamespace(nsCtx, &pb.RegisterNamespaceRequest{
+		Name: "ns1",
+	})
+	if err != nil {
+		t.Fatalf("RegisterNamespace failed: %v", err)
+	}
+
+	// 2. Call PutVariable with no actor metadata (should default to anonymous)
+	val, _ := structpb.NewValue("v1")
+	_, err = client.PutVariable(ctx, &pb.PutVariableRequest{
+		Namespace: "ns1",
+		Name:      "var1",
+		Value:     val,
+	})
+	if err != nil {
+		t.Fatalf("PutVariable failed: %v", err)
+	}
+
+	// 3. Call GetNamespace (should NOT be logged as it's not state-changing)
+	_, err = client.GetNamespace(ctx, &pb.GetNamespaceRequest{Name: "ns1"})
+	if err != nil {
+		t.Fatalf("GetNamespace failed: %v", err)
+	}
+
+	// Verify logs in store
+	logs, err := store.GetAuditLogs(ctx)
+	if err != nil {
+		t.Fatalf("failed to get audit logs: %v", err)
+	}
+
+	if len(logs) != 2 {
+		t.Fatalf("expected exactly 2 audit logs, got %d: %+v", len(logs), logs)
+	}
+
+	// Verify first log (RegisterNamespace by alice)
+	l1 := logs[0]
+	if l1.Action != "RegisterNamespace" {
+		t.Errorf("expected RegisterNamespace, got %q", l1.Action)
+	}
+	if l1.Target != "ns1" {
+		t.Errorf("expected target 'ns1', got %q", l1.Target)
+	}
+	if l1.Actor != "alice" {
+		t.Errorf("expected actor 'alice', got %q", l1.Actor)
+	}
+	if !l1.Timestamp.Equal(clock.Now()) {
+		t.Errorf("expected timestamp %v, got %v", clock.Now(), l1.Timestamp)
+	}
+	// Verify details contains json representation of request
+	var req1 pb.RegisterNamespaceRequest
+	if err := protojson.Unmarshal([]byte(l1.Details), &req1); err != nil {
+		t.Errorf("failed to unmarshal details: %v", err)
+	}
+	if req1.GetName() != "ns1" {
+		t.Errorf("unexpected name in details: %s", req1.GetName())
+	}
+
+	// Verify second log (PutVariable by anonymous)
+	l2 := logs[1]
+	if l2.Action != "PutVariable" {
+		t.Errorf("expected PutVariable, got %q", l2.Action)
+	}
+	if l2.Target != "ns1/var1" {
+		t.Errorf("expected target 'ns1/var1', got %q", l2.Target)
+	}
+	if l2.Actor != "anonymous" {
+		t.Errorf("expected actor 'anonymous', got %q", l2.Actor)
+	}
+	if !l2.Timestamp.Equal(clock.Now()) {
+		t.Errorf("expected timestamp %v, got %v", clock.Now(), l2.Timestamp)
+	}
+	var req2 pb.PutVariableRequest
+	if err := protojson.Unmarshal([]byte(l2.Details), &req2); err != nil {
+		t.Errorf("failed to unmarshal details: %v", err)
+	}
+	if req2.GetNamespace() != "ns1" || req2.GetName() != "var1" {
+		t.Errorf("unexpected details: %s", l2.Details)
 	}
 }
 

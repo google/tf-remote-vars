@@ -38,6 +38,15 @@ type Dependency struct {
 	Variable string
 }
 
+// AuditLog represents an audit log entry in Varlet.
+type AuditLog struct {
+	Timestamp time.Time
+	Actor     string
+	Action    string
+	Target    string
+	Details   string
+}
+
 // Store defines the interface for data persistence.
 type Store interface {
 	RegisterNamespace(ctx context.Context, ns *Namespace) error
@@ -59,6 +68,10 @@ type Store interface {
 	GetDependencies(ctx context.Context, consumerNS string) ([]string, error)
 	GetConsumers(ctx context.Context, sourceNS, varName string) ([]string, error)
 	GetAllDependencies(ctx context.Context) ([]*Dependency, error)
+
+	// Audit Logs
+	WriteAuditLog(ctx context.Context, log *AuditLog) error
+	GetAuditLogs(ctx context.Context) ([]*AuditLog, error)
 
 	Close() error
 }
@@ -119,6 +132,14 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		PRIMARY KEY (consumer_namespace, source_namespace, variable_name),
 		FOREIGN KEY (consumer_namespace) REFERENCES namespaces(name) ON DELETE CASCADE,
 		FOREIGN KEY (source_namespace) REFERENCES namespaces(name) ON DELETE CASCADE
+	);
+	CREATE TABLE IF NOT EXISTS audit_logs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp DATETIME,
+		actor TEXT,
+		action TEXT,
+		target TEXT,
+		details TEXT
 	);`
 	if _, err := db.Exec(query); err != nil {
 		db.Close()
@@ -392,5 +413,37 @@ func (s *SQLiteStore) GetConsumers(ctx context.Context, sourceNS, varName string
 		return nil, fmt.Errorf("rows error: %w", err)
 	}
 	return consumers, nil
+}
+
+// WriteAuditLog writes an audit log entry.
+func (s *SQLiteStore) WriteAuditLog(ctx context.Context, log *AuditLog) error {
+	query := `INSERT INTO audit_logs (timestamp, actor, action, target, details) VALUES (?, ?, ?, ?, ?)`
+	_, err := s.db.ExecContext(ctx, query, log.Timestamp, log.Actor, log.Action, log.Target, log.Details)
+	if err != nil {
+		return fmt.Errorf("failed to write audit log: %w", err)
+	}
+	return nil
+}
+
+// GetAuditLogs retrieves all audit log entries, ordered by timestamp ascending.
+func (s *SQLiteStore) GetAuditLogs(ctx context.Context) ([]*AuditLog, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT timestamp, actor, action, target, details FROM audit_logs ORDER BY timestamp ASC")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get audit logs: %w", err)
+	}
+	defer rows.Close()
+
+	var logs []*AuditLog
+	for rows.Next() {
+		var l AuditLog
+		if err := rows.Scan(&l.Timestamp, &l.Actor, &l.Action, &l.Target, &l.Details); err != nil {
+			return nil, fmt.Errorf("failed to scan audit log: %w", err)
+		}
+		logs = append(logs, &l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+	return logs, nil
 }
 

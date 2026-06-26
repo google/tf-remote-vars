@@ -76,11 +76,11 @@ Automatically trigger downstream stack runs when dependencies change.
     *   Verify the test HTTP server receives a POST request.
 *   **Blocked by:** Slice 4
 
-### Slice 7: Audit Logging
+### Slice 7: Audit Logging [DONE]
 Log all state-changing operations for security and debugging.
-*   **Tasks:**
-    *   **Backend:** Add `audit_logs` table to SQLite store.
-    *   **Backend:** Implement gRPC interceptor/middleware to automatically log all write/delete/register operations, capturing the actor's identity from gRPC metadata.
+*   Tasks:
+    *   [x] **Backend:** Add `audit_logs` table to SQLite store.
+    *   [x] **Backend:** Implement gRPC interceptor/middleware to automatically log all write/delete/register operations, capturing the actor's identity from gRPC metadata.
 *   **Acceptance Criteria:**
     *   Perform namespace policy updates, variable writes, and consumer registrations.
     *   Verify the `audit_logs` table contains detailed entries with correct timestamps, actions, targets, and actor identities.
