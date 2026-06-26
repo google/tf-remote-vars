@@ -13,6 +13,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/jonboulle/clockwork"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -37,7 +38,9 @@ func startTestServer(t *testing.T) (string, backend.Store) {
 		t.Fatalf("failed to create store: %v", err)
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(backend.AuditInterceptor(store, clockwork.NewRealClock())),
+	)
 	server := backend.NewServer(store)
 	pb.RegisterVarletServiceServer(grpcServer, server)
 
@@ -534,6 +537,74 @@ resource "varlet_input" "allowed" {
 `, addr),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr("varlet_input.allowed", "value", "secret"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccAuditLogging(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	addr, store := startTestServer(t)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+provider "varlet" {
+  endpoint = %q
+}
+
+resource "varlet_namespace" "ns" {
+  name = "audit-ns"
+}
+
+resource "varlet_output" "out" {
+  namespace  = "audit-ns"
+  name       = "var1"
+  value      = "hello"
+  depends_on = [varlet_namespace.ns]
+}
+`, addr),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("varlet_output.out", "value", "hello"),
+					func(s *terraform.State) error {
+						logs, err := store.GetAuditLogs(ctx)
+						if err != nil {
+							return fmt.Errorf("failed to get audit logs: %w", err)
+						}
+
+						// We expect:
+						// 1. RegisterNamespace (audit-ns)
+						// 2. PutVariable (audit-ns/var1)
+						// There might be more if TF does updates, but at least these 2 should be there.
+						var foundRegister, foundPut bool
+						for _, l := range logs {
+							if l.Action == "RegisterNamespace" && l.Target == "audit-ns" {
+								foundRegister = true
+								if l.Actor != "anonymous" {
+									return fmt.Errorf("expected actor 'anonymous' for RegisterNamespace, got %q", l.Actor)
+								}
+							}
+							if l.Action == "PutVariable" && l.Target == "audit-ns/var1" {
+								foundPut = true
+								if l.Actor != "anonymous" {
+									return fmt.Errorf("expected actor 'anonymous' for PutVariable, got %q", l.Actor)
+								}
+							}
+						}
+
+						if !foundRegister {
+							return fmt.Errorf("RegisterNamespace log not found. Logs: %+v", logs)
+						}
+						if !foundPut {
+							return fmt.Errorf("PutVariable log not found. Logs: %+v", logs)
+						}
+
+						return nil
+					},
 				),
 			},
 		},

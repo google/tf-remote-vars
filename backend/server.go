@@ -12,7 +12,9 @@ import (
 
 	pb "github.com/google/varlet/proto/v1"
 	"github.com/jonboulle/clockwork"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -550,6 +552,86 @@ func (s *Server) callWebhook(ctx context.Context, url, consumerNS, sourceNS, var
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		log.Printf("[WARNING] webhook call to %s returned status %d", url, resp.StatusCode)
+	}
+}
+
+// AuditInterceptor returns a gRPC unary server interceptor that logs state-changing operations to the store.
+func AuditInterceptor(store Store, clock clockwork.Clock) grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context,
+		req any,
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (any, error) {
+		resp, err := handler(ctx, req)
+		if err != nil {
+			return resp, err
+		}
+
+		action := ""
+		target := ""
+
+		switch info.FullMethod {
+		case "/varlet.v1.VarletService/RegisterNamespace":
+			action = "RegisterNamespace"
+			if r, ok := req.(*pb.RegisterNamespaceRequest); ok {
+				target = r.GetName()
+			}
+		case "/varlet.v1.VarletService/SetNamespacePolicy":
+			action = "SetNamespacePolicy"
+			if r, ok := req.(*pb.SetNamespacePolicyRequest); ok {
+				target = r.GetNamespace()
+			}
+		case "/varlet.v1.VarletService/PutVariable":
+			action = "PutVariable"
+			if r, ok := req.(*pb.PutVariableRequest); ok {
+				target = r.GetNamespace() + "/" + r.GetName()
+			}
+		case "/varlet.v1.VarletService/DeleteVariable":
+			action = "DeleteVariable"
+			if r, ok := req.(*pb.DeleteVariableRequest); ok {
+				target = r.GetNamespace() + "/" + r.GetName()
+			}
+		case "/varlet.v1.VarletService/RegisterConsumer":
+			action = "RegisterConsumer"
+			if r, ok := req.(*pb.RegisterConsumerRequest); ok {
+				target = r.GetConsumerNamespace() + " -> " + r.GetSourceNamespace() + "/" + r.GetVariableName()
+			}
+		case "/varlet.v1.VarletService/DeregisterConsumer":
+			action = "DeregisterConsumer"
+			if r, ok := req.(*pb.DeregisterConsumerRequest); ok {
+				target = r.GetConsumerNamespace() + " -> " + r.GetSourceNamespace() + "/" + r.GetVariableName()
+			}
+		}
+
+		if action != "" {
+			actor := "anonymous"
+			if md, ok := metadata.FromIncomingContext(ctx); ok {
+				if actors := md.Get("x-actor"); len(actors) > 0 {
+					actor = actors[0]
+				}
+			}
+
+			var details string
+			if protoReq, ok := req.(proto.Message); ok {
+				if b, err := protojson.Marshal(protoReq); err == nil {
+					details = string(b)
+				}
+			}
+
+			auditLog := &AuditLog{
+				Timestamp: clock.Now(),
+				Actor:     actor,
+				Action:    action,
+				Target:    target,
+				Details:   details,
+			}
+			if err := store.WriteAuditLog(ctx, auditLog); err != nil {
+				log.Printf("[ERROR] failed to write audit log: %v", err)
+			}
+		}
+
+		return resp, err
 	}
 }
 
