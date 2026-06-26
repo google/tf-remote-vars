@@ -35,13 +35,13 @@ Enable writing variables of any Terraform type, storing history.
     *   Reading the variable returns the latest version.
 *   **Blocked by:** Slice 1
 
-### Slice 3: Consuming Variables & Dependency Protection (with DAG Enforcement) End-to-End
+### Slice 3: Consuming Variables & Dependency Protection (with DAG Enforcement) End-to-End [DONE]
 Enable reading variables, tracking dependencies, and preventing cycles/unsafe deletions.
-*   **Tasks:**
-    *   **Backend:** Define `Store` interface for Dependencies. Implement SQLite store. Implement `RegisterConsumer`, `DeregisterConsumer`, and `GetVariableValue` gRPC handlers. Return `actuation_nonce` in responses.
-    *   **Backend:** Implement **Cycle Detection** (DAG enforcement) in `RegisterConsumer`.
-    *   **Backend:** Update `DeleteVariable` to block if there are active consumers.
-    *   **Provider:** Implement `varlet_input` resource. Deserialize `google.protobuf.Value` back to TF types. Expose `trigger` (actuation nonce) attribute.
+*   Tasks:
+    *   [x] **Backend:** Define `Store` interface for Dependencies. Implement SQLite store. Implement `RegisterConsumer`, `DeregisterConsumer`, and `GetVariableValue` gRPC handlers. Return `actuation_nonce` in responses.
+    *   [x] **Backend:** Implement **Cycle Detection** (DAG enforcement) in `RegisterConsumer`.
+    *   [x] **Backend:** Update `DeleteVariable` to block if there are active consumers.
+    *   [x] **Provider:** Implement `varlet_input` resource. Deserialize `google.protobuf.Value` back to TF types. Expose `trigger` (actuation nonce) attribute.
 *   **Acceptance Criteria:**
     *   Stack A exports `var1`. Stack B consumes `var1`. Stack B cannot export `var2` if Stack A consumes `var2` (circular dependency blocked).
     *   Attempting to delete Stack A's variable fails if Stack B is consuming it.

@@ -248,3 +248,111 @@ resource "varlet_output" "map" {
 		},
 	})
 }
+
+func TestAccInputResource(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	addr, store := startTestServer(t)
+
+	err := store.RegisterNamespace(ctx, &backend.Namespace{Name: "ns-a"})
+	if err != nil {
+		t.Fatalf("failed to register ns-a: %v", err)
+	}
+	err = store.RegisterNamespace(ctx, &backend.Namespace{Name: "ns-b"})
+	if err != nil {
+		t.Fatalf("failed to register ns-b: %v", err)
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+provider "varlet" {
+  alias     = "a"
+  endpoint  = %[1]q
+  namespace = "ns-a"
+}
+provider "varlet" {
+  alias     = "b"
+  endpoint  = %[1]q
+  namespace = "ns-b"
+}
+
+resource "varlet_output" "var_a" {
+  provider  = varlet.a
+  namespace = "ns-a"
+  name      = "var_a"
+  value     = "val_a"
+}
+
+resource "varlet_input" "input_a" {
+  provider         = varlet.b
+  namespace        = "ns-b"
+  source_namespace = "ns-a"
+  name             = "var_a"
+  depends_on       = [varlet_output.var_a]
+}
+`, addr),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("varlet_input.input_a", "value", "val_a"),
+					resource.TestCheckResourceAttr("varlet_input.input_a", "trigger", "1"),
+					func(s *terraform.State) error {
+						isCons, err := store.IsConsumer(ctx, "ns-b", "ns-a", "var_a")
+						if err != nil {
+							return fmt.Errorf("failed to check consumer: %w", err)
+						}
+						if !isCons {
+							return fmt.Errorf("expected ns-b to be consumer of ns-a/var_a")
+						}
+						return nil
+					},
+				),
+			},
+			{
+				Config: fmt.Sprintf(`
+provider "varlet" {
+  alias     = "a"
+  endpoint  = %[1]q
+  namespace = "ns-a"
+}
+provider "varlet" {
+  alias     = "b"
+  endpoint  = %[1]q
+  namespace = "ns-b"
+}
+
+resource "varlet_output" "var_a" {
+  provider  = varlet.a
+  namespace = "ns-a"
+  name      = "var_a"
+  value     = "val_a"
+}
+resource "varlet_input" "input_a" {
+  provider         = varlet.b
+  namespace        = "ns-b"
+  source_namespace = "ns-a"
+  name             = "var_a"
+  depends_on       = [varlet_output.var_a]
+}
+
+resource "varlet_output" "var_b" {
+  provider  = varlet.b
+  namespace = "ns-b"
+  name      = "var_b"
+  value     = "val_b"
+}
+
+resource "varlet_input" "input_b" {
+  provider         = varlet.a
+  namespace        = "ns-a"
+  source_namespace = "ns-b"
+  name             = "var_b"
+  depends_on       = [varlet_output.var_b]
+}
+`, addr),
+				ExpectError: regexp.MustCompile("would introduce a cycle"),
+			},
+		},
+	})
+}

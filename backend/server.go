@@ -119,17 +119,174 @@ func (s *Server) PutVariable(ctx context.Context, req *pb.PutVariableRequest) (*
 
 // DeleteVariable deletes a variable.
 func (s *Server) DeleteVariable(ctx context.Context, req *pb.DeleteVariableRequest) (*pb.DeleteVariableResponse, error) {
-	if req.GetNamespace() == "" {
+	ns := req.GetNamespace()
+	name := req.GetName()
+
+	if ns == "" {
 		return nil, status.Error(codes.InvalidArgument, "namespace cannot be empty")
 	}
-	if req.GetName() == "" {
+	if name == "" {
 		return nil, status.Error(codes.InvalidArgument, "name cannot be empty")
 	}
 
-	if err := s.store.DeleteVariable(ctx, req.GetNamespace(), req.GetName()); err != nil {
+	if !req.GetForce() {
+		hasCons, err := s.store.HasConsumers(ctx, ns, name)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to check active consumers: %v", err)
+		}
+		if hasCons {
+			return nil, status.Error(codes.FailedPrecondition, "cannot delete variable with active consumers")
+		}
+	}
+
+	if err := s.store.DeleteVariable(ctx, ns, name); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete variable: %v", err)
 	}
 
 	return &pb.DeleteVariableResponse{}, nil
+}
+
+// RegisterConsumer registers a consumer for a variable.
+func (s *Server) RegisterConsumer(ctx context.Context, req *pb.RegisterConsumerRequest) (*pb.RegisterConsumerResponse, error) {
+	cNS := req.GetConsumerNamespace()
+	sNS := req.GetSourceNamespace()
+	varName := req.GetVariableName()
+
+	if cNS == "" || sNS == "" || varName == "" {
+		return nil, status.Error(codes.InvalidArgument, "consumer_namespace, source_namespace, and variable_name cannot be empty")
+	}
+
+	// Verify consumer namespace exists
+	_, err := s.store.GetNamespace(ctx, cNS)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, status.Errorf(codes.InvalidArgument, "consumer namespace %q does not exist", cNS)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to check consumer namespace: %v", err)
+	}
+
+	// Verify variable exists first
+	v, err := s.store.GetLatestVariable(ctx, sNS, varName)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, status.Errorf(codes.FailedPrecondition, "variable %s/%s does not exist", sNS, varName)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to check variable existence: %v", err)
+	}
+
+	// Check for cycles
+	cycle, err := s.hasCycle(ctx, cNS, sNS)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to detect cycles: %v", err)
+	}
+	if cycle {
+		return nil, status.Error(codes.FailedPrecondition, "registering this dependency would introduce a cycle")
+	}
+
+	// Register consumer
+	if err := s.store.RegisterConsumer(ctx, cNS, sNS, varName); err != nil {
+		isCons, err2 := s.store.IsConsumer(ctx, cNS, sNS, varName)
+		if err2 == nil && isCons {
+			// Already registered, just proceed to return value (idempotent)
+		} else {
+			return nil, status.Errorf(codes.Internal, "failed to register consumer: %v", err)
+		}
+	}
+
+	// Return value and nonce (version)
+	var pbVal structpb.Value
+	if err := protojson.Unmarshal(v.Value, &pbVal); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to unmarshal variable value: %v", err)
+	}
+
+	return &pb.RegisterConsumerResponse{
+		Value:          &pbVal,
+		ActuationNonce: v.Version,
+	}, nil
+}
+
+// DeregisterConsumer deregisters a consumer for a variable.
+func (s *Server) DeregisterConsumer(ctx context.Context, req *pb.DeregisterConsumerRequest) (*pb.DeregisterConsumerResponse, error) {
+	cNS := req.GetConsumerNamespace()
+	sNS := req.GetSourceNamespace()
+	varName := req.GetVariableName()
+
+	if cNS == "" || sNS == "" || varName == "" {
+		return nil, status.Error(codes.InvalidArgument, "consumer_namespace, source_namespace, and variable_name cannot be empty")
+	}
+
+	if err := s.store.DeregisterConsumer(ctx, cNS, sNS, varName); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to deregister consumer: %v", err)
+	}
+
+	return &pb.DeregisterConsumerResponse{}, nil
+}
+
+// GetVariableValue retrieves the value of a variable for a consumer.
+func (s *Server) GetVariableValue(ctx context.Context, req *pb.GetVariableValueRequest) (*pb.GetVariableValueResponse, error) {
+	cNS := req.GetConsumerNamespace()
+	sNS := req.GetSourceNamespace()
+	varName := req.GetVariableName()
+
+	if cNS == "" || sNS == "" || varName == "" {
+		return nil, status.Error(codes.InvalidArgument, "consumer_namespace, source_namespace, and variable_name cannot be empty")
+	}
+
+	// Verify registration
+	isCons, err := s.store.IsConsumer(ctx, cNS, sNS, varName)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to check registration: %v", err)
+	}
+	if !isCons {
+		return nil, status.Errorf(codes.FailedPrecondition, "consumer %s is not registered for variable %s/%s", cNS, sNS, varName)
+	}
+
+	// Get latest value
+	v, err := s.store.GetLatestVariable(ctx, sNS, varName)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, status.Errorf(codes.NotFound, "variable %s/%s not found", sNS, varName)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to get variable: %v", err)
+	}
+
+	var pbVal structpb.Value
+	if err := protojson.Unmarshal(v.Value, &pbVal); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to unmarshal variable value: %v", err)
+	}
+
+	return &pb.GetVariableValueResponse{
+		Value:          &pbVal,
+		ActuationNonce: v.Version,
+	}, nil
+}
+
+func (s *Server) hasCycle(ctx context.Context, startNS, targetNS string) (bool, error) {
+	visited := make(map[string]bool)
+	var dfs func(ns string) (bool, error)
+	dfs = func(ns string) (bool, error) {
+		if ns == startNS {
+			return true, nil
+		}
+		if visited[ns] {
+			return false, nil
+		}
+		visited[ns] = true
+		deps, err := s.store.GetDependencies(ctx, ns)
+		if err != nil {
+			return false, err
+		}
+		for _, dep := range deps {
+			found, err := dfs(dep)
+			if err != nil {
+				return false, err
+			}
+			if found {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	return dfs(targetNS)
 }
 
