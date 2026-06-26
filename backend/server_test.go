@@ -1,7 +1,10 @@
 package backend
 
 import (
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -1144,5 +1147,135 @@ func TestGetDependencyGraph(t *testing.T) {
 			t.Errorf("expected NotFound, got %v", err)
 		}
 	})
+}
+
+func TestWebhookPropagation(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	server := NewServer(store)
+
+	received := make(chan struct {
+		Consumer string
+		Source   string
+		Variable string
+	}, 10)
+
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		var payload struct {
+			ConsumerNamespace string `json:"consumer_namespace"`
+			SourceNamespace   string `json:"source_namespace"`
+			VariableName     string `json:"variable_name"`
+		}
+		err := json.NewDecoder(r.Body).Decode(&payload)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		t.Logf("Test server received webhook for consumer %q", payload.ConsumerNamespace)
+		received <- struct {
+			Consumer string
+			Source   string
+			Variable string
+		}{
+			Consumer: payload.ConsumerNamespace,
+			Source:   payload.SourceNamespace,
+			Variable: payload.VariableName,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer testServer.Close()
+
+	err := store.RegisterNamespace(ctx, &Namespace{Name: "source-ns"})
+	if err != nil {
+		t.Fatalf("failed to register source-ns: %v", err)
+	}
+	err = store.RegisterNamespace(ctx, &Namespace{
+		Name:          "consumer-1",
+		RunWebhookURL: testServer.URL,
+	})
+	if err != nil {
+		t.Fatalf("failed to register consumer-1: %v", err)
+	}
+	err = store.RegisterNamespace(ctx, &Namespace{
+		Name: "consumer-2",
+	})
+	if err != nil {
+		t.Fatalf("failed to register consumer-2: %v", err)
+	}
+	err = store.RegisterNamespace(ctx, &Namespace{
+		Name:          "consumer-3",
+		RunWebhookURL: testServer.URL,
+	})
+	if err != nil {
+		t.Fatalf("failed to register consumer-3: %v", err)
+	}
+
+	val, _ := structpb.NewValue("initial")
+	_, err = server.PutVariable(ctx, &pb.PutVariableRequest{
+		Namespace: "source-ns",
+		Name:      "var1",
+		Value:     val,
+	})
+	if err != nil {
+		t.Fatalf("failed to put variable: %v", err)
+	}
+
+	for _, c := range []string{"consumer-1", "consumer-2", "consumer-3"} {
+		_, err = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+			ConsumerNamespace: c,
+			SourceNamespace:   "source-ns",
+			VariableName:     "var1",
+		})
+		if err != nil {
+			t.Fatalf("failed to register consumer %s: %v", c, err)
+		}
+	}
+
+	val2, _ := structpb.NewValue("updated")
+	_, err = server.PutVariable(ctx, &pb.PutVariableRequest{
+		Namespace: "source-ns",
+		Name:      "var1",
+		Value:     val2,
+	})
+	if err != nil {
+		t.Fatalf("failed to update variable: %v", err)
+	}
+
+	expected := map[string]bool{
+		"consumer-1": true,
+		"consumer-3": true,
+	}
+
+	numExpected := len(expected)
+	timeout := time.After(2 * time.Second)
+	for i := 0; i < numExpected; i++ {
+		select {
+		case event := <-received:
+			if event.Source != "source-ns" || event.Variable != "var1" {
+				t.Errorf("unexpected event content: %+v", event)
+			}
+			if !expected[event.Consumer] {
+				t.Errorf("unexpected consumer triggered: %s", event.Consumer)
+			}
+			delete(expected, event.Consumer)
+		case <-timeout:
+			t.Fatalf("timeout waiting for webhooks, missing consumers: %+v", expected)
+		}
+	}
+
+	// Give webhook client time to finish receiving responses before closing testServer
+	time.Sleep(100 * time.Millisecond)
+
+	select {
+	case event := <-received:
+		t.Errorf("received extra unexpected event: %+v", event)
+	default:
+		// OK
+	}
 }
 
