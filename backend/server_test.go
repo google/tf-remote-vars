@@ -995,3 +995,154 @@ func TestRetentionPolicyPruning(t *testing.T) {
 	}
 }
 
+func TestGetDependencyGraph(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	server := NewServer(store)
+
+	// Set up graph: A -> B -> C, D (isolated)
+	for _, ns := range []string{"A", "B", "C", "D"} {
+		err := store.RegisterNamespace(ctx, &Namespace{Name: ns})
+		if err != nil {
+			t.Fatalf("failed to register namespace %s: %v", ns, err)
+		}
+	}
+
+	val, _ := structpb.NewValue("val")
+	_, err := server.PutVariable(ctx, &pb.PutVariableRequest{Namespace: "C", Name: "var_c", Value: val})
+	if err != nil {
+		t.Fatalf("failed to put var_c: %v", err)
+	}
+	_, err = server.PutVariable(ctx, &pb.PutVariableRequest{Namespace: "B", Name: "var_b", Value: val})
+	if err != nil {
+		t.Fatalf("failed to put var_b: %v", err)
+	}
+
+	_, err = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+		ConsumerNamespace: "A",
+		SourceNamespace:   "B",
+		VariableName:     "var_b",
+	})
+	if err != nil {
+		t.Fatalf("RegisterConsumer A->B failed: %v", err)
+	}
+
+	_, err = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+		ConsumerNamespace: "B",
+		SourceNamespace:   "C",
+		VariableName:     "var_c",
+	})
+	if err != nil {
+		t.Fatalf("RegisterConsumer B->C failed: %v", err)
+	}
+
+	t.Run("EntireGraph", func(t *testing.T) {
+		resp, err := server.GetDependencyGraph(ctx, &pb.GetDependencyGraphRequest{})
+		if err != nil {
+			t.Fatalf("GetDependencyGraph failed: %v", err)
+		}
+
+		expectedNS := map[string]bool{"A": true, "B": true, "C": true, "D": true}
+		if len(resp.GetNamespaces()) != len(expectedNS) {
+			t.Errorf("expected %d namespaces, got %d", len(expectedNS), len(resp.GetNamespaces()))
+		}
+		for _, ns := range resp.GetNamespaces() {
+			if !expectedNS[ns] {
+				t.Errorf("unexpected namespace in response: %s", ns)
+			}
+		}
+
+		if len(resp.GetEdges()) != 2 {
+			t.Errorf("expected 2 edges, got %d", len(resp.GetEdges()))
+		}
+		hasAB := false
+		hasBC := false
+		for _, edge := range resp.GetEdges() {
+			if edge.GetConsumerNamespace() == "A" && edge.GetSourceNamespace() == "B" && edge.GetVariableName() == "var_b" {
+				hasAB = true
+			}
+			if edge.GetConsumerNamespace() == "B" && edge.GetSourceNamespace() == "C" && edge.GetVariableName() == "var_c" {
+				hasBC = true
+			}
+		}
+		if !hasAB {
+			t.Error("missing edge A->B")
+		}
+		if !hasBC {
+			t.Error("missing edge B->C")
+		}
+	})
+
+	t.Run("FilteredByRootA", func(t *testing.T) {
+		resp, err := server.GetDependencyGraph(ctx, &pb.GetDependencyGraphRequest{Namespace: "A"})
+		if err != nil {
+			t.Fatalf("GetDependencyGraph failed: %v", err)
+		}
+
+		expectedNS := map[string]bool{"A": true, "B": true, "C": true}
+		if len(resp.GetNamespaces()) != len(expectedNS) {
+			t.Errorf("expected %d namespaces, got %d: %v", len(expectedNS), len(resp.GetNamespaces()), resp.GetNamespaces())
+		}
+		for _, ns := range resp.GetNamespaces() {
+			if !expectedNS[ns] {
+				t.Errorf("unexpected namespace in response: %s", ns)
+			}
+		}
+
+		if len(resp.GetEdges()) != 2 {
+			t.Errorf("expected 2 edges, got %d", len(resp.GetEdges()))
+		}
+	})
+
+	t.Run("FilteredByRootB", func(t *testing.T) {
+		resp, err := server.GetDependencyGraph(ctx, &pb.GetDependencyGraphRequest{Namespace: "B"})
+		if err != nil {
+			t.Fatalf("GetDependencyGraph failed: %v", err)
+		}
+
+		expectedNS := map[string]bool{"B": true, "C": true}
+		if len(resp.GetNamespaces()) != len(expectedNS) {
+			t.Errorf("expected %d namespaces, got %d: %v", len(expectedNS), len(resp.GetNamespaces()), resp.GetNamespaces())
+		}
+		for _, ns := range resp.GetNamespaces() {
+			if !expectedNS[ns] {
+				t.Errorf("unexpected namespace in response: %s", ns)
+			}
+		}
+
+		if len(resp.GetEdges()) != 1 {
+			t.Errorf("expected 1 edge, got %d", len(resp.GetEdges()))
+		}
+		edge := resp.GetEdges()[0]
+		if edge.GetConsumerNamespace() != "B" || edge.GetSourceNamespace() != "C" {
+			t.Errorf("expected edge B->C, got %s->%s", edge.GetConsumerNamespace(), edge.GetSourceNamespace())
+		}
+	})
+
+	t.Run("FilteredByRootD", func(t *testing.T) {
+		resp, err := server.GetDependencyGraph(ctx, &pb.GetDependencyGraphRequest{Namespace: "D"})
+		if err != nil {
+			t.Fatalf("GetDependencyGraph failed: %v", err)
+		}
+
+		if len(resp.GetNamespaces()) != 1 || resp.GetNamespaces()[0] != "D" {
+			t.Errorf("expected namespaces [D], got %v", resp.GetNamespaces())
+		}
+		if len(resp.GetEdges()) != 0 {
+			t.Errorf("expected 0 edges, got %d", len(resp.GetEdges()))
+		}
+	})
+
+	t.Run("NotFound", func(t *testing.T) {
+		_, err := server.GetDependencyGraph(ctx, &pb.GetDependencyGraphRequest{Namespace: "non-existent"})
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		st, ok := status.FromError(err)
+		if !ok || st.Code() != codes.NotFound {
+			t.Errorf("expected NotFound, got %v", err)
+		}
+	})
+}
+

@@ -59,13 +59,10 @@ Configure namespace metadata, access control allowlists, retention policies, and
     *   Access control allowlist restricts consumption as before.
 *   **Blocked by:** Slice 3
 
-### Slice 5: Dependency Graph API
+### Slice 5: Dependency Graph API [DONE]
 Expose the dependency graph for visualization.
-*   **Tasks:**
-    *   **Backend:** Implement `GetDependencyGraph` gRPC handler. Query the `dependencies` table to construct the nodes and edges of the graph.
-*   **Acceptance Criteria:**
-    *   Querying `GetDependencyGraph` returns the correct list of namespaces and dependency edges reflecting the current state.
-*   **Blocked by:** Slice 3
+*   Tasks:
+    *   [x] **Backend:** Implement `GetDependencyGraph` gRPC handler. Query the `dependencies` table to construct the nodes and edges of the graph.
 
 ### Slice 6: Change Propagation (Actuation Webhooks)
 Automatically trigger downstream stack runs when dependencies change.

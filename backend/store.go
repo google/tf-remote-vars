@@ -31,10 +31,18 @@ type Variable struct {
 	CreatedAt time.Time
 }
 
+// Dependency represents a dependency edge in Varlet.
+type Dependency struct {
+	Consumer string
+	Source   string
+	Variable string
+}
+
 // Store defines the interface for data persistence.
 type Store interface {
 	RegisterNamespace(ctx context.Context, ns *Namespace) error
 	GetNamespace(ctx context.Context, name string) (*Namespace, error)
+	GetNamespaces(ctx context.Context) ([]string, error)
 	SetNamespacePolicy(ctx context.Context, namespace string, allowedConsumers []string) error
 
 	// Variables
@@ -49,6 +57,7 @@ type Store interface {
 	IsConsumer(ctx context.Context, consumerNS, sourceNS, varName string) (bool, error)
 	HasConsumers(ctx context.Context, sourceNS, varName string) (bool, error)
 	GetDependencies(ctx context.Context, consumerNS string) ([]string, error)
+	GetAllDependencies(ctx context.Context) ([]*Dependency, error)
 
 	Close() error
 }
@@ -321,5 +330,43 @@ func (s *SQLiteStore) PruneVariables(ctx context.Context, namespace, name string
 		}
 	}
 	return nil
+}
+
+// GetNamespaces returns all registered namespace names.
+func (s *SQLiteStore) GetNamespaces(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT name FROM namespaces ORDER BY name ASC")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get namespaces: %w", err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, fmt.Errorf("failed to scan namespace name: %w", err)
+		}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+// GetAllDependencies returns all dependency edges in the database.
+func (s *SQLiteStore) GetAllDependencies(ctx context.Context) ([]*Dependency, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT consumer_namespace, source_namespace, variable_name FROM dependencies ORDER BY consumer_namespace ASC, source_namespace ASC")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all dependencies: %w", err)
+	}
+	defer rows.Close()
+
+	var deps []*Dependency
+	for rows.Next() {
+		var dep Dependency
+		if err := rows.Scan(&dep.Consumer, &dep.Source, &dep.Variable); err != nil {
+			return nil, fmt.Errorf("failed to scan dependency: %w", err)
+		}
+		deps = append(deps, &dep)
+	}
+	return deps, nil
 }
 
