@@ -3,8 +3,10 @@ package backend
 import (
 	"errors"
 	"testing"
+	"time"
 
 	pb "github.com/google/varlet/proto/v1"
+	"github.com/jonboulle/clockwork"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -75,30 +77,33 @@ func TestRegisterNamespaceError(t *testing.T) {
 		}
 	})
 
-	t.Run("DuplicateName", func(t *testing.T) {
+	t.Run("UpsertBehavior", func(t *testing.T) {
 		t.Parallel()
 		ctx := t.Context()
 		store := newTestStore(t)
 		server := NewServer(store)
 
 		req := &pb.RegisterNamespaceRequest{
-			Name: "duplicate",
+			Name:          "upsert-ns",
+			RunWebhookUrl: "http://first",
 		}
 		_, err := server.RegisterNamespace(ctx, req)
 		if err != nil {
 			t.Fatalf("first registration failed: %v", err)
 		}
 
+		req.RunWebhookUrl = "http://second"
 		_, err = server.RegisterNamespace(ctx, req)
-		if err == nil {
-			t.Fatal("expected error on duplicate registration, got nil")
+		if err != nil {
+			t.Fatalf("second registration failed: %v", err)
 		}
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatalf("expected gRPC status error, got %v", err)
+
+		ns, err := store.GetNamespace(ctx, "upsert-ns")
+		if err != nil {
+			t.Fatalf("failed to get namespace: %v", err)
 		}
-		if st.Code() != codes.Internal {
-			t.Errorf("expected code %v, got %v", codes.Internal, st.Code())
+		if ns.RunWebhookURL != "http://second" {
+			t.Errorf("expected updated webhook URL 'http://second', got %q", ns.RunWebhookURL)
 		}
 	})
 }
@@ -754,6 +759,239 @@ func TestDeleteVariableBlocked(t *testing.T) {
 	_, err = store.GetLatestVariable(ctx, "ns1", "var1")
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestNamespacePolicyAndWebhook(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	server := NewServer(store)
+
+	// Register with policy and webhook
+	req := &pb.RegisterNamespaceRequest{
+		Name: "policy-ns",
+		RetentionPolicy: &pb.RetentionPolicy{
+			MinVersions: 5,
+			MaxAgeDays:  10,
+		},
+		RunWebhookUrl: "http://example.com/webhook",
+	}
+	_, err := server.RegisterNamespace(ctx, req)
+	if err != nil {
+		t.Fatalf("RegisterNamespace failed: %v", err)
+	}
+
+	// Retrieve and verify
+	getResp, err := server.GetNamespace(ctx, &pb.GetNamespaceRequest{Name: "policy-ns"})
+	if err != nil {
+		t.Fatalf("GetNamespace failed: %v", err)
+	}
+	if getResp.GetRunWebhookUrl() != "http://example.com/webhook" {
+		t.Errorf("expected webhook url, got %q", getResp.GetRunWebhookUrl())
+	}
+	if getResp.GetRetentionPolicy() == nil {
+		t.Fatal("expected retention policy, got nil")
+	}
+	if getResp.GetRetentionPolicy().GetMinVersions() != 5 {
+		t.Errorf("expected min versions 5, got %d", getResp.GetRetentionPolicy().GetMinVersions())
+	}
+	if getResp.GetRetentionPolicy().GetMaxAgeDays() != 10 {
+		t.Errorf("expected max age days 10, got %d", getResp.GetRetentionPolicy().GetMaxAgeDays())
+	}
+}
+
+func TestSetNamespacePolicyAndAccessControl(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	server := NewServer(store)
+
+	// Register source and consumers
+	for _, ns := range []string{"source", "allowed-1", "allowed-2", "blocked"} {
+		if err := store.RegisterNamespace(ctx, &Namespace{Name: ns}); err != nil {
+			t.Fatalf("failed to register namespace %s: %v", ns, err)
+		}
+	}
+
+	// Create a variable in source
+	val, _ := structpb.NewValue("secret")
+	_, err := server.PutVariable(ctx, &pb.PutVariableRequest{
+		Namespace: "source",
+		Name:      "var",
+		Value:     val,
+	})
+	if err != nil {
+		t.Fatalf("PutVariable failed: %v", err)
+	}
+
+	// Set policy: allow "allowed-*"
+	_, err = server.SetNamespacePolicy(ctx, &pb.SetNamespacePolicyRequest{
+		Namespace:        "source",
+		AllowedConsumers: []string{"allowed-*"},
+	})
+	if err != nil {
+		t.Fatalf("SetNamespacePolicy failed: %v", err)
+	}
+
+	// Verify allowed consumer can register
+	_, err = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+		ConsumerNamespace: "allowed-1",
+		SourceNamespace:   "source",
+		VariableName:     "var",
+	})
+	if err != nil {
+		t.Errorf("RegisterConsumer for allowed-1 failed: %v", err)
+	}
+
+	// Verify blocked consumer cannot register
+	_, err = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+		ConsumerNamespace: "blocked",
+		SourceNamespace:   "source",
+		VariableName:     "var",
+	})
+	if err == nil {
+		t.Error("expected RegisterConsumer for blocked to fail, got nil")
+	} else {
+		st, ok := status.FromError(err)
+		if !ok || st.Code() != codes.PermissionDenied {
+			t.Errorf("expected PermissionDenied, got %v", err)
+		}
+	}
+
+	// Verify blocked consumer cannot read value directly
+	if err := store.RegisterConsumer(ctx, "blocked", "source", "var"); err != nil {
+		t.Fatalf("failed to force register: %v", err)
+	}
+
+	_, err = server.GetVariableValue(ctx, &pb.GetVariableValueRequest{
+		ConsumerNamespace: "blocked",
+		SourceNamespace:   "source",
+		VariableName:     "var",
+	})
+	if err == nil {
+		t.Error("expected GetVariableValue for blocked to fail, got nil")
+	} else {
+		st, ok := status.FromError(err)
+		if !ok || st.Code() != codes.PermissionDenied {
+			t.Errorf("expected PermissionDenied, got %v", err)
+		}
+	}
+
+	// Allowed consumer can read
+	_, err = server.GetVariableValue(ctx, &pb.GetVariableValueRequest{
+		ConsumerNamespace: "allowed-1",
+		SourceNamespace:   "source",
+		VariableName:     "var",
+	})
+	if err != nil {
+		t.Errorf("GetVariableValue for allowed-1 failed: %v", err)
+	}
+}
+
+func TestRetentionPolicyPruning(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	fakeClock := clockwork.NewFakeClock()
+	server := NewServerWithClock(store, fakeClock)
+
+	// Register with min=2, age=10 days
+	err := store.RegisterNamespace(ctx, &Namespace{
+		Name:                       "ns",
+		RetentionPolicyMinVersions: 2,
+		RetentionPolicyMaxAgeDays:  10,
+	})
+	if err != nil {
+		t.Fatalf("failed to register namespace: %v", err)
+	}
+
+	val, _ := structpb.NewValue("val")
+	putReq := &pb.PutVariableRequest{
+		Namespace: "ns",
+		Name:      "var",
+		Value:     val,
+	}
+
+	// Write v1 (t=0)
+	_, err = server.PutVariable(ctx, putReq)
+	if err != nil {
+		t.Fatalf("Put v1 failed: %v", err)
+	}
+
+	// Advance time 5 days
+	fakeClock.Advance(5 * 24 * time.Hour)
+
+	// Write v2 (t=5d)
+	putReq.Value, _ = structpb.NewValue("val2")
+	_, err = server.PutVariable(ctx, putReq)
+	if err != nil {
+		t.Fatalf("Put v2 failed: %v", err)
+	}
+
+	// Advance time 6 days (total 11 days)
+	fakeClock.Advance(6 * 24 * time.Hour)
+
+	// Write v3 (t=11d). v1 is older than 10d.
+	putReq.Value, _ = structpb.NewValue("val3")
+	_, err = server.PutVariable(ctx, putReq)
+	if err != nil {
+		t.Fatalf("Put v3 failed: %v", err)
+	}
+
+	// Verify v1 is pruned, v2 and v3 exist
+	sqlStore := store.(*SQLiteStore)
+	var count int
+	err = sqlStore.db.QueryRow("SELECT COUNT(*) FROM variables WHERE namespace = 'ns' AND name = 'var'").Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to count variables: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("expected 2 versions remaining, got %d", count)
+	}
+
+	var versions []int64
+	rows, err := sqlStore.db.Query("SELECT version FROM variables WHERE namespace = 'ns' AND name = 'var' ORDER BY version ASC")
+	if err != nil {
+		t.Fatalf("failed to query versions: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var v int64
+		if err := rows.Scan(&v); err != nil {
+			t.Fatalf("scan error: %v", err)
+		}
+		versions = append(versions, v)
+	}
+	if len(versions) != 2 || versions[0] != 2 || versions[1] != 3 {
+		t.Errorf("expected versions [2, 3], got %v", versions)
+	}
+
+	// Test "keep min versions anyway"
+	fakeClock.Advance(20 * 24 * time.Hour)
+
+	// Write v4 (t=31d). v2 and v3 are older than 10d.
+	putReq.Value, _ = structpb.NewValue("val4")
+	_, err = server.PutVariable(ctx, putReq)
+	if err != nil {
+		t.Fatalf("Put v4 failed: %v", err)
+	}
+
+	versions = nil
+	rows, err = sqlStore.db.Query("SELECT version FROM variables WHERE namespace = 'ns' AND name = 'var' ORDER BY version ASC")
+	if err != nil {
+		t.Fatalf("failed to query versions: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var v int64
+		if err := rows.Scan(&v); err != nil {
+			t.Fatalf("scan error: %v", err)
+		}
+		versions = append(versions, v)
+	}
+	if len(versions) != 2 || versions[0] != 3 || versions[1] != 4 {
+		t.Errorf("expected versions [3, 4] (v2 pruned, v3 kept to satisfy min=2), got %v", versions)
 	}
 }
 

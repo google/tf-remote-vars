@@ -3,8 +3,10 @@ package backend
 import (
 	"context"
 	"errors"
+	"path"
 
 	pb "github.com/google/varlet/proto/v1"
+	"github.com/jonboulle/clockwork"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -16,11 +18,23 @@ import (
 type Server struct {
 	pb.UnimplementedVarletServiceServer
 	store Store
+	clock clockwork.Clock
 }
 
-// NewServer creates a new Server.
+// NewServer creates a new Server with a real clock.
 func NewServer(store Store) *Server {
-	return &Server{store: store}
+	return &Server{
+		store: store,
+		clock: clockwork.NewRealClock(),
+	}
+}
+
+// NewServerWithClock creates a new Server with a custom clock.
+func NewServerWithClock(store Store, clock clockwork.Clock) *Server {
+	return &Server{
+		store: store,
+		clock: clock,
+	}
 }
 
 // RegisterNamespace registers a new namespace.
@@ -30,7 +44,12 @@ func (s *Server) RegisterNamespace(ctx context.Context, req *pb.RegisterNamespac
 	}
 
 	ns := &Namespace{
-		Name: req.GetName(),
+		Name:          req.GetName(),
+		RunWebhookURL: req.GetRunWebhookUrl(),
+	}
+	if req.GetRetentionPolicy() != nil {
+		ns.RetentionPolicyMinVersions = req.GetRetentionPolicy().GetMinVersions()
+		ns.RetentionPolicyMaxAgeDays = req.GetRetentionPolicy().GetMaxAgeDays()
 	}
 
 	if err := s.store.RegisterNamespace(ctx, ns); err != nil {
@@ -56,10 +75,19 @@ func (s *Server) GetNamespace(ctx context.Context, req *pb.GetNamespaceRequest) 
 		return nil, status.Errorf(codes.Internal, "failed to get namespace: %v", err)
 	}
 
-	return &pb.GetNamespaceResponse{
-		Name: ns.Name,
-		// ponytail: only name is returned for now, other fields will be added in Slice 4.
-	}, nil
+	resp := &pb.GetNamespaceResponse{
+		Name:             ns.Name,
+		AllowedConsumers: ns.AllowedConsumers,
+		RunWebhookUrl:    ns.RunWebhookURL,
+	}
+	if ns.RetentionPolicyMinVersions > 0 || ns.RetentionPolicyMaxAgeDays > 0 {
+		resp.RetentionPolicy = &pb.RetentionPolicy{
+			MinVersions: ns.RetentionPolicyMinVersions,
+			MaxAgeDays:  ns.RetentionPolicyMaxAgeDays,
+		}
+	}
+
+	return resp, nil
 }
 
 // PutVariable stores a new variable version.
@@ -108,9 +136,23 @@ func (s *Server) PutVariable(ctx context.Context, req *pb.PutVariableRequest) (*
 			Name:      req.GetName(),
 			Version:   version,
 			Value:     newValueBytes,
+			CreatedAt: s.clock.Now(),
 		}
 		if err := s.store.PutVariable(ctx, v); err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to store variable: %v", err)
+		}
+
+		// Enforce retention policy
+		ns, err := s.store.GetNamespace(ctx, req.GetNamespace())
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to get namespace for retention check: %v", err)
+		}
+
+		if ns.RetentionPolicyMaxAgeDays > 0 {
+			cutoff := s.clock.Now().AddDate(0, 0, -int(ns.RetentionPolicyMaxAgeDays))
+			if err := s.store.PruneVariables(ctx, v.Namespace, v.Name, ns.RetentionPolicyMinVersions, cutoff); err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to enforce retention policy: %v", err)
+			}
 		}
 	}
 
@@ -163,6 +205,11 @@ func (s *Server) RegisterConsumer(ctx context.Context, req *pb.RegisterConsumerR
 			return nil, status.Errorf(codes.InvalidArgument, "consumer namespace %q does not exist", cNS)
 		}
 		return nil, status.Errorf(codes.Internal, "failed to check consumer namespace: %v", err)
+	}
+
+	// Check access policy
+	if err := s.checkAccess(ctx, cNS, sNS); err != nil {
+		return nil, err
 	}
 
 	// Verify variable exists first
@@ -241,6 +288,11 @@ func (s *Server) GetVariableValue(ctx context.Context, req *pb.GetVariableValueR
 		return nil, status.Errorf(codes.FailedPrecondition, "consumer %s is not registered for variable %s/%s", cNS, sNS, varName)
 	}
 
+	// Check access policy
+	if err := s.checkAccess(ctx, cNS, sNS); err != nil {
+		return nil, err
+	}
+
 	// Get latest value
 	v, err := s.store.GetLatestVariable(ctx, sNS, varName)
 	if err != nil {
@@ -288,5 +340,59 @@ func (s *Server) hasCycle(ctx context.Context, startNS, targetNS string) (bool, 
 		return false, nil
 	}
 	return dfs(targetNS)
+}
+
+func (s *Server) SetNamespacePolicy(ctx context.Context, req *pb.SetNamespacePolicyRequest) (*pb.SetNamespacePolicyResponse, error) {
+	ns := req.GetNamespace()
+	allowed := req.GetAllowedConsumers()
+
+	if ns == "" {
+		return nil, status.Error(codes.InvalidArgument, "namespace cannot be empty")
+	}
+
+	// Verify namespace exists
+	_, err := s.store.GetNamespace(ctx, ns)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, status.Errorf(codes.NotFound, "namespace %q not found", ns)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to check namespace: %v", err)
+	}
+
+	if err := s.store.SetNamespacePolicy(ctx, ns, allowed); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to set namespace policy: %v", err)
+	}
+
+	return &pb.SetNamespacePolicyResponse{}, nil
+}
+
+func (s *Server) checkAccess(ctx context.Context, consumerNS, sourceNS string) error {
+	if consumerNS == sourceNS {
+		return nil
+	}
+
+	ns, err := s.store.GetNamespace(ctx, sourceNS)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return status.Errorf(codes.NotFound, "source namespace %q not found", sourceNS)
+		}
+		return status.Errorf(codes.Internal, "failed to get source namespace: %v", err)
+	}
+
+	if len(ns.AllowedConsumers) == 0 {
+		return nil // Open by default
+	}
+
+	for _, pattern := range ns.AllowedConsumers {
+		matched, err := path.Match(pattern, consumerNS)
+		if err != nil {
+			continue
+		}
+		if matched {
+			return nil
+		}
+	}
+
+	return status.Errorf(codes.PermissionDenied, "namespace %q is not allowed to consume from %q", consumerNS, sourceNS)
 }
 

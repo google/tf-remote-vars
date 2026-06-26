@@ -356,3 +356,186 @@ resource "varlet_input" "input_b" {
 		},
 	})
 }
+
+func TestAccNamespaceResource(t *testing.T) {
+	t.Parallel()
+	addr, _ := startTestServer(t)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+provider "varlet" {
+  endpoint = %q
+}
+
+resource "varlet_namespace" "ns1" {
+  name              = "test-acc-ns"
+  run_webhook_url   = "http://example.com/hook"
+  allowed_consumers = ["consumer-*"]
+  retention_policy = {
+    min_versions = 3
+    max_age_days = 5
+  }
+}
+`, addr),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("varlet_namespace.ns1", "id", "test-acc-ns"),
+					resource.TestCheckResourceAttr("varlet_namespace.ns1", "name", "test-acc-ns"),
+					resource.TestCheckResourceAttr("varlet_namespace.ns1", "run_webhook_url", "http://example.com/hook"),
+					resource.TestCheckResourceAttr("varlet_namespace.ns1", "allowed_consumers.0", "consumer-*"),
+					resource.TestCheckResourceAttr("varlet_namespace.ns1", "retention_policy.min_versions", "3"),
+					resource.TestCheckResourceAttr("varlet_namespace.ns1", "retention_policy.max_age_days", "5"),
+				),
+			},
+			{
+				Config: fmt.Sprintf(`
+provider "varlet" {
+  endpoint = %q
+}
+
+resource "varlet_namespace" "ns1" {
+  name            = "test-acc-ns"
+  run_webhook_url = "http://example.com/hook2"
+  retention_policy = {
+    min_versions = 1
+    max_age_days = 2
+  }
+}
+`, addr),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("varlet_namespace.ns1", "run_webhook_url", "http://example.com/hook2"),
+					resource.TestCheckResourceAttr("varlet_namespace.ns1", "allowed_consumers.#", "0"),
+					resource.TestCheckResourceAttr("varlet_namespace.ns1", "retention_policy.min_versions", "1"),
+					resource.TestCheckResourceAttr("varlet_namespace.ns1", "retention_policy.max_age_days", "2"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccNamespaceAccessControl(t *testing.T) {
+	t.Parallel()
+	addr, _ := startTestServer(t)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Step 1: Set up namespaces and variable.
+			// allowed-1 matches "allowed-*", blocked-1 does not.
+			{
+				Config: fmt.Sprintf(`
+provider "varlet" {
+  alias    = "source"
+  endpoint = %[1]q
+}
+
+resource "varlet_namespace" "source" {
+  provider          = varlet.source
+  name              = "source"
+  allowed_consumers = ["allowed-*"]
+}
+
+resource "varlet_namespace" "allowed" {
+  provider = varlet.source
+  name     = "allowed-1"
+}
+
+resource "varlet_namespace" "blocked" {
+  provider = varlet.source
+  name     = "blocked-1"
+}
+
+resource "varlet_output" "var" {
+  provider  = varlet.source
+  namespace = "source"
+  name      = "var"
+  value     = "secret"
+  depends_on = [varlet_namespace.source]
+}
+`, addr),
+			},
+			// Step 2: Try to register blocked consumer -> should fail
+			{
+				Config: fmt.Sprintf(`
+provider "varlet" {
+  alias    = "source"
+  endpoint = %[1]q
+}
+provider "varlet" {
+  alias    = "blocked"
+  endpoint = %[1]q
+}
+
+resource "varlet_namespace" "source" {
+  provider          = varlet.source
+  name              = "source"
+  allowed_consumers = ["allowed-*"]
+}
+resource "varlet_namespace" "blocked" {
+  provider = varlet.source
+  name     = "blocked-1"
+}
+resource "varlet_output" "var" {
+  provider  = varlet.source
+  namespace = "source"
+  name      = "var"
+  value     = "secret"
+  depends_on = [varlet_namespace.source]
+}
+
+resource "varlet_input" "blocked" {
+  provider         = varlet.blocked
+  namespace        = "blocked-1"
+  source_namespace = "source"
+  name             = "var"
+  depends_on       = [varlet_output.var, varlet_namespace.blocked]
+}
+`, addr),
+				ExpectError: regexp.MustCompile("is not allowed to consume"),
+			},
+			// Step 3: Register allowed consumer -> should succeed
+			{
+				Config: fmt.Sprintf(`
+provider "varlet" {
+  alias    = "source"
+  endpoint = %[1]q
+}
+provider "varlet" {
+  alias    = "allowed"
+  endpoint = %[1]q
+}
+
+resource "varlet_namespace" "source" {
+  provider          = varlet.source
+  name              = "source"
+  allowed_consumers = ["allowed-*"]
+}
+resource "varlet_namespace" "allowed" {
+  provider = varlet.source
+  name     = "allowed-1"
+}
+resource "varlet_output" "var" {
+  provider  = varlet.source
+  namespace = "source"
+  name      = "var"
+  value     = "secret"
+  depends_on = [varlet_namespace.source]
+}
+
+resource "varlet_input" "allowed" {
+  provider         = varlet.allowed
+  namespace        = "allowed-1"
+  source_namespace = "source"
+  name             = "var"
+  depends_on       = [varlet_output.var, varlet_namespace.allowed]
+}
+`, addr),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("varlet_input.allowed", "value", "secret"),
+				),
+			},
+		},
+	})
+}

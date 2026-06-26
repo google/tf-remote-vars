@@ -47,13 +47,13 @@ Enable reading variables, tracking dependencies, and preventing cycles/unsafe de
     *   Attempting to delete Stack A's variable fails if Stack B is consuming it.
 *   **Blocked by:** Slice 2
 
-### Slice 4: Namespace Metadata, Policy & Retention End-to-End
+### Slice 4: Namespace Metadata, Policy & Retention End-to-End [DONE]
 Configure namespace metadata, access control allowlists, retention policies, and webhook URLs.
-*   **Tasks:**
-    *   **Backend:** Update `namespaces` table to store `run_webhook_url` and `retention_policy` (min_versions, max_age_days).
-    *   **Backend:** Implement `SetNamespacePolicy` (allowlist). Enforce **Version Retention** during `PutVariable` (prune old versions).
-    *   **Backend:** Enforce access control allowlist (with wildcards) during reads/registrations.
-    *   **Provider:** Implement `varlet_namespace` **resource** to configure `allowed_consumers`, `retention_policy` block, and `run_webhook_url`.
+*   Tasks:
+    *   [x] **Backend:** Update `namespaces` table to store `run_webhook_url` and `retention_policy` (min_versions, max_age_days).
+    *   [x] **Backend:** Implement `SetNamespacePolicy` (allowlist). Enforce **Version Retention** during `PutVariable` (prune old versions).
+    *   [x] **Backend:** Enforce access control allowlist (with wildcards) during reads/registrations.
+    *   [x] **Provider:** Implement `varlet_namespace` **resource** to configure `allowed_consumers`, `retention_policy` block, and `run_webhook_url`.
 *   **Acceptance Criteria:**
     *   Stack A configures retention (min=3, age=30d). Writing 5 versions in 1 run prunes the oldest 2 (if older than 30d, or keep 3 anyway).
     *   Access control allowlist restricts consumption as before.
