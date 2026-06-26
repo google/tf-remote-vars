@@ -443,3 +443,317 @@ func TestDeleteVariableError(t *testing.T) {
 	})
 }
 
+func TestRegisterConsumerSuccess(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	server := NewServer(store)
+
+	if err := store.RegisterNamespace(ctx, &Namespace{Name: "source-ns"}); err != nil {
+		t.Fatalf("failed to register source namespace: %v", err)
+	}
+	if err := store.RegisterNamespace(ctx, &Namespace{Name: "consumer-ns"}); err != nil {
+		t.Fatalf("failed to register consumer namespace: %v", err)
+	}
+
+	val, _ := structpb.NewValue("hello")
+	valBytes, _ := protojson.Marshal(val)
+	v := &Variable{
+		Namespace: "source-ns",
+		Name:      "my_var",
+		Version:   1,
+		Value:     valBytes,
+	}
+	if err := store.PutVariable(ctx, v); err != nil {
+		t.Fatalf("failed to put variable: %v", err)
+	}
+
+	req := &pb.RegisterConsumerRequest{
+		ConsumerNamespace: "consumer-ns",
+		SourceNamespace:   "source-ns",
+		VariableName:     "my_var",
+	}
+
+	resp, err := server.RegisterConsumer(ctx, req)
+	if err != nil {
+		t.Fatalf("RegisterConsumer failed: %v", err)
+	}
+
+	if resp.GetActuationNonce() != 1 {
+		t.Errorf("expected nonce 1, got %d", resp.GetActuationNonce())
+	}
+	if resp.GetValue().GetStringValue() != "hello" {
+		t.Errorf("expected value 'hello', got %v", resp.GetValue())
+	}
+
+	isCons, err := store.IsConsumer(ctx, "consumer-ns", "source-ns", "my_var")
+	if err != nil {
+		t.Fatalf("IsConsumer failed: %v", err)
+	}
+	if !isCons {
+		t.Error("expected consumer-ns to be consumer of source-ns/my_var")
+	}
+}
+
+func TestRegisterConsumerCycleDetection(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	server := NewServer(store)
+
+	for _, ns := range []string{"A", "B", "C"} {
+		if err := store.RegisterNamespace(ctx, &Namespace{Name: ns}); err != nil {
+			t.Fatalf("failed to register namespace %s: %v", ns, err)
+		}
+	}
+
+	val, _ := structpb.NewValue("dummy")
+	valBytes, _ := protojson.Marshal(val)
+	for _, ns := range []string{"A", "B", "C"} {
+		v := &Variable{
+			Namespace: ns,
+			Name:      "var",
+			Version:   1,
+			Value:     valBytes,
+		}
+		if err := store.PutVariable(ctx, v); err != nil {
+			t.Fatalf("failed to put variable in %s: %v", ns, err)
+		}
+	}
+
+	_, err := server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+		ConsumerNamespace: "A",
+		SourceNamespace:   "B",
+		VariableName:     "var",
+	})
+	if err != nil {
+		t.Fatalf("RegisterConsumer A->B failed: %v", err)
+	}
+
+	_, err = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+		ConsumerNamespace: "B",
+		SourceNamespace:   "C",
+		VariableName:     "var",
+	})
+	if err != nil {
+		t.Fatalf("RegisterConsumer B->C failed: %v", err)
+	}
+
+	_, err = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+		ConsumerNamespace: "C",
+		SourceNamespace:   "A",
+		VariableName:     "var",
+	})
+
+	if err == nil {
+		t.Fatal("expected error due to cycle, got nil")
+	}
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.FailedPrecondition {
+		t.Errorf("expected FailedPrecondition, got %v", err)
+	}
+}
+
+func TestGetVariableValueSuccess(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	server := NewServer(store)
+
+	if err := store.RegisterNamespace(ctx, &Namespace{Name: "ns1"}); err != nil {
+		t.Fatalf("failed to register ns1: %v", err)
+	}
+	if err := store.RegisterNamespace(ctx, &Namespace{Name: "ns2"}); err != nil {
+		t.Fatalf("failed to register ns2: %v", err)
+	}
+
+	val, _ := structpb.NewValue("hello")
+	valBytes, _ := protojson.Marshal(val)
+	v := &Variable{
+		Namespace: "ns1",
+		Name:      "var1",
+		Version:   42,
+		Value:     valBytes,
+	}
+	if err := store.PutVariable(ctx, v); err != nil {
+		t.Fatalf("failed to put variable: %v", err)
+	}
+
+	_, err := server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+		ConsumerNamespace: "ns2",
+		SourceNamespace:   "ns1",
+		VariableName:     "var1",
+	})
+	if err != nil {
+		t.Fatalf("RegisterConsumer failed: %v", err)
+	}
+
+	req := &pb.GetVariableValueRequest{
+		ConsumerNamespace: "ns2",
+		SourceNamespace:   "ns1",
+		VariableName:     "var1",
+	}
+	resp, err := server.GetVariableValue(ctx, req)
+	if err != nil {
+		t.Fatalf("GetVariableValue failed: %v", err)
+	}
+
+	if resp.GetActuationNonce() != 42 {
+		t.Errorf("expected nonce 42, got %d", resp.GetActuationNonce())
+	}
+	if resp.GetValue().GetStringValue() != "hello" {
+		t.Errorf("expected 'hello', got %v", resp.GetValue())
+	}
+}
+
+func TestGetVariableValueNotRegistered(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	server := NewServer(store)
+
+	if err := store.RegisterNamespace(ctx, &Namespace{Name: "ns1"}); err != nil {
+		t.Fatalf("failed to register ns1: %v", err)
+	}
+	if err := store.RegisterNamespace(ctx, &Namespace{Name: "ns2"}); err != nil {
+		t.Fatalf("failed to register ns2: %v", err)
+	}
+
+	val, _ := structpb.NewValue("hello")
+	valBytes, _ := protojson.Marshal(val)
+	v := &Variable{
+		Namespace: "ns1",
+		Name:      "var1",
+		Version:   1,
+		Value:     valBytes,
+	}
+	if err := store.PutVariable(ctx, v); err != nil {
+		t.Fatalf("failed to put variable: %v", err)
+	}
+
+	req := &pb.GetVariableValueRequest{
+		ConsumerNamespace: "ns2",
+		SourceNamespace:   "ns1",
+		VariableName:     "var1",
+	}
+	_, err := server.GetVariableValue(ctx, req)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.FailedPrecondition {
+		t.Errorf("expected FailedPrecondition, got %v", err)
+	}
+}
+
+func TestDeregisterConsumerSuccess(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	server := NewServer(store)
+
+	if err := store.RegisterNamespace(ctx, &Namespace{Name: "ns1"}); err != nil {
+		t.Fatalf("failed to register ns1: %v", err)
+	}
+	if err := store.RegisterNamespace(ctx, &Namespace{Name: "ns2"}); err != nil {
+		t.Fatalf("failed to register ns2: %v", err)
+	}
+	val, _ := structpb.NewValue("hello")
+	valBytes, _ := protojson.Marshal(val)
+	v := &Variable{
+		Namespace: "ns1",
+		Name:      "var1",
+		Version:   1,
+		Value:     valBytes,
+	}
+	if err := store.PutVariable(ctx, v); err != nil {
+		t.Fatalf("failed to put variable: %v", err)
+	}
+
+	_, err := server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+		ConsumerNamespace: "ns2",
+		SourceNamespace:   "ns1",
+		VariableName:     "var1",
+	})
+	if err != nil {
+		t.Fatalf("RegisterConsumer failed: %v", err)
+	}
+
+	_, err = server.DeregisterConsumer(ctx, &pb.DeregisterConsumerRequest{
+		ConsumerNamespace: "ns2",
+		SourceNamespace:   "ns1",
+		VariableName:     "var1",
+	})
+	if err != nil {
+		t.Fatalf("DeregisterConsumer failed: %v", err)
+	}
+
+	isCons, err := store.IsConsumer(ctx, "ns2", "ns1", "var1")
+	if err != nil {
+		t.Fatalf("IsConsumer failed: %v", err)
+	}
+	if isCons {
+		t.Error("expected ns2 to NOT be consumer anymore")
+	}
+}
+
+func TestDeleteVariableBlocked(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	server := NewServer(store)
+
+	if err := store.RegisterNamespace(ctx, &Namespace{Name: "ns1"}); err != nil {
+		t.Fatalf("failed to register ns1: %v", err)
+	}
+	if err := store.RegisterNamespace(ctx, &Namespace{Name: "ns2"}); err != nil {
+		t.Fatalf("failed to register ns2: %v", err)
+	}
+	val, _ := structpb.NewValue("hello")
+	valBytes, _ := protojson.Marshal(val)
+	v := &Variable{
+		Namespace: "ns1",
+		Name:      "var1",
+		Version:   1,
+		Value:     valBytes,
+	}
+	if err := store.PutVariable(ctx, v); err != nil {
+		t.Fatalf("failed to put variable: %v", err)
+	}
+	_, err := server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+		ConsumerNamespace: "ns2",
+		SourceNamespace:   "ns1",
+		VariableName:     "var1",
+	})
+	if err != nil {
+		t.Fatalf("RegisterConsumer failed: %v", err)
+	}
+
+	_, err = server.DeleteVariable(ctx, &pb.DeleteVariableRequest{
+		Namespace: "ns1",
+		Name:      "var1",
+		Force:     false,
+	})
+	if err == nil {
+		t.Fatal("expected error deleting variable with active consumers, got nil")
+	}
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.FailedPrecondition {
+		t.Errorf("expected FailedPrecondition, got %v", err)
+	}
+
+	_, err = server.DeleteVariable(ctx, &pb.DeleteVariableRequest{
+		Namespace: "ns1",
+		Name:      "var1",
+		Force:     true,
+	})
+	if err != nil {
+		t.Fatalf("DeleteVariable with force failed: %v", err)
+	}
+
+	_, err = store.GetLatestVariable(ctx, "ns1", "var1")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+

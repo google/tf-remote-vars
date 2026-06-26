@@ -35,6 +35,13 @@ type Store interface {
 	GetLatestVariable(ctx context.Context, namespace, name string) (*Variable, error)
 	DeleteVariable(ctx context.Context, namespace, name string) error
 
+	// Dependencies
+	RegisterConsumer(ctx context.Context, consumerNS, sourceNS, varName string) error
+	DeregisterConsumer(ctx context.Context, consumerNS, sourceNS, varName string) error
+	IsConsumer(ctx context.Context, consumerNS, sourceNS, varName string) (bool, error)
+	HasConsumers(ctx context.Context, sourceNS, varName string) (bool, error)
+	GetDependencies(ctx context.Context, consumerNS string) ([]string, error)
+
 	Close() error
 }
 
@@ -77,6 +84,14 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		value BLOB,
 		PRIMARY KEY (namespace, name, version),
 		FOREIGN KEY (namespace) REFERENCES namespaces(name) ON DELETE CASCADE
+	);
+	CREATE TABLE IF NOT EXISTS dependencies (
+		consumer_namespace TEXT,
+		source_namespace TEXT,
+		variable_name TEXT,
+		PRIMARY KEY (consumer_namespace, source_namespace, variable_name),
+		FOREIGN KEY (consumer_namespace) REFERENCES namespaces(name) ON DELETE CASCADE,
+		FOREIGN KEY (source_namespace) REFERENCES namespaces(name) ON DELETE CASCADE
 	);`
 	if _, err := db.Exec(query); err != nil {
 		db.Close()
@@ -149,5 +164,71 @@ func (s *SQLiteStore) DeleteVariable(ctx context.Context, namespace, name string
 // Close closes the database connection.
 func (s *SQLiteStore) Close() error {
 	return s.db.Close()
+}
+
+func (s *SQLiteStore) RegisterConsumer(ctx context.Context, consumerNS, sourceNS, varName string) error {
+	query := `INSERT INTO dependencies (consumer_namespace, source_namespace, variable_name) VALUES (?, ?, ?)`
+	_, err := s.db.ExecContext(ctx, query, consumerNS, sourceNS, varName)
+	if err != nil {
+		return fmt.Errorf("failed to register consumer: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) DeregisterConsumer(ctx context.Context, consumerNS, sourceNS, varName string) error {
+	query := `DELETE FROM dependencies WHERE consumer_namespace = ? AND source_namespace = ? AND variable_name = ?`
+	_, err := s.db.ExecContext(ctx, query, consumerNS, sourceNS, varName)
+	if err != nil {
+		return fmt.Errorf("failed to deregister consumer: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) IsConsumer(ctx context.Context, consumerNS, sourceNS, varName string) (bool, error) {
+	query := `SELECT 1 FROM dependencies WHERE consumer_namespace = ? AND source_namespace = ? AND variable_name = ?`
+	var dummy int
+	err := s.db.QueryRowContext(ctx, query, consumerNS, sourceNS, varName).Scan(&dummy)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check if consumer: %w", err)
+	}
+	return true, nil
+}
+
+func (s *SQLiteStore) HasConsumers(ctx context.Context, sourceNS, varName string) (bool, error) {
+	query := `SELECT 1 FROM dependencies WHERE source_namespace = ? AND variable_name = ? LIMIT 1`
+	var dummy int
+	err := s.db.QueryRowContext(ctx, query, sourceNS, varName).Scan(&dummy)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check if has consumers: %w", err)
+	}
+	return true, nil
+}
+
+func (s *SQLiteStore) GetDependencies(ctx context.Context, consumerNS string) ([]string, error) {
+	query := `SELECT DISTINCT source_namespace FROM dependencies WHERE consumer_namespace = ?`
+	rows, err := s.db.QueryContext(ctx, query, consumerNS)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get dependencies: %w", err)
+	}
+	defer rows.Close()
+
+	var deps []string
+	for rows.Next() {
+		var dep string
+		if err := rows.Scan(&dep); err != nil {
+			return nil, fmt.Errorf("failed to scan dependency: %w", err)
+		}
+		deps = append(deps, dep)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+	return deps, nil
 }
 
