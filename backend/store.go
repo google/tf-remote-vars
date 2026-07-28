@@ -60,6 +60,7 @@ type Store interface {
 	GetLatestVariable(ctx context.Context, namespace, name string) (*Variable, error)
 	DeleteVariable(ctx context.Context, namespace, name string) error
 	PruneVariables(ctx context.Context, namespace, name string, minVersions int32, cutoff time.Time) error
+	HasVariables(ctx context.Context, namespace string) (bool, error)
 
 	// Dependencies
 	RegisterConsumer(ctx context.Context, consumerNS, sourceNS, varName string) error
@@ -235,6 +236,16 @@ func (s *SQLiteStore) DeleteVariable(ctx context.Context, namespace, name string
 		return fmt.Errorf("failed to delete variable: %w", err)
 	}
 	return nil
+}
+
+func (s *SQLiteStore) HasVariables(ctx context.Context, namespace string) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM variables WHERE namespace = ?)`
+	var exists bool
+	err := s.db.QueryRowContext(ctx, query, namespace).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check if namespace has variables: %w", err)
+	}
+	return exists, nil
 }
 
 // Close closes the database connection.

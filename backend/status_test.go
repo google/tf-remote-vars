@@ -17,7 +17,7 @@ func TestStatusTransitions(t *testing.T) {
 	fakeClock := clockwork.NewFakeClock()
 	server := NewServerWithClock(store, fakeClock)
 
-	// Setup: A -> B
+	// Test topology: A -> B
 	err := store.RegisterNamespace(ctx, &Namespace{Name: "A"})
 	if err != nil {
 		t.Fatalf("failed to register A: %v", err)
@@ -56,7 +56,7 @@ func TestStatusTransitions(t *testing.T) {
 		t.Fatalf("failed to register consumer: %v", err)
 	}
 
-	// 1. Initial status check
+
 	graph, err := server.GetDependencyGraph(ctx, &pb.GetDependencyGraphRequest{})
 	if err != nil {
 		t.Fatalf("GetDependencyGraph failed: %v", err)
@@ -68,7 +68,7 @@ func TestStatusTransitions(t *testing.T) {
 		t.Errorf("expected B to be idle, got %s", status)
 	}
 
-	// 2. A starts actuating
+
 	_, err = server.RegisterNamespace(ctx, &pb.RegisterNamespaceRequest{Name: "A"})
 	if err != nil {
 		t.Fatalf("RegisterNamespace A failed: %v", err)
@@ -85,7 +85,7 @@ func TestStatusTransitions(t *testing.T) {
 		t.Errorf("expected B to be potentially-affected, got %s", status)
 	}
 
-	// 3. A finishes with changes
+
 	val2, _ := structpb.NewValue("val2")
 	_, err = server.PutVariable(ctx, &pb.PutVariableRequest{
 		Namespace: "A",
@@ -107,7 +107,7 @@ func TestStatusTransitions(t *testing.T) {
 		t.Errorf("expected B to be affected, got %s", status)
 	}
 
-	// 4. B starts actuating
+
 	_, err = server.RegisterNamespace(ctx, &pb.RegisterNamespaceRequest{Name: "B"})
 	if err != nil {
 		t.Fatalf("RegisterNamespace B failed: %v", err)
@@ -121,7 +121,7 @@ func TestStatusTransitions(t *testing.T) {
 		t.Errorf("expected B to be actuating, got %s", status)
 	}
 
-	// 5. B times out
+
 	fakeClock.Advance(50 * time.Second)
 
 	graph, err = server.GetDependencyGraph(ctx, &pb.GetDependencyGraphRequest{})

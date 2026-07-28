@@ -26,6 +26,16 @@ var webhookClient = &http.Client{
 	Timeout: 5 * time.Second,
 }
 
+type NamespaceStatus string
+
+const (
+	StatusIdle                NamespaceStatus = "idle"
+	StatusActuating           NamespaceStatus = "actuating"
+	StatusSucceeded           NamespaceStatus = "succeeded"
+	StatusAffected            NamespaceStatus = "affected"
+	StatusPotentiallyAffected NamespaceStatus = "potentially-affected"
+)
+
 // Server implements the VarletService gRPC server.
 type Server struct {
 	pb.UnimplementedVarletServiceServer
@@ -38,19 +48,7 @@ type Server struct {
 	succeeded map[string]bool
 }
 
-// NewServer creates a new Server with a real clock.
-func NewServer(store Store) *Server {
-	return &Server{
-		store:     store,
-		clock:     clockwork.NewRealClock(),
-		actuating: make(map[string]time.Time),
-		affected:  make(map[string]bool),
-		succeeded: make(map[string]bool),
-	}
-}
-
-// NewServerWithClock creates a new Server with a custom clock.
-func NewServerWithClock(store Store, clock clockwork.Clock) *Server {
+func newServer(store Store, clock clockwork.Clock) *Server {
 	return &Server{
 		store:     store,
 		clock:     clock,
@@ -58,6 +56,16 @@ func NewServerWithClock(store Store, clock clockwork.Clock) *Server {
 		affected:  make(map[string]bool),
 		succeeded: make(map[string]bool),
 	}
+}
+
+// NewServer creates a new Server with a real clock.
+func NewServer(store Store) *Server {
+	return newServer(store, clockwork.NewRealClock())
+}
+
+// NewServerWithClock creates a new Server with a custom clock.
+func NewServerWithClock(store Store, clock clockwork.Clock) *Server {
+	return newServer(store, clock)
 }
 
 // RegisterNamespace registers a new namespace.
@@ -84,11 +92,7 @@ func (s *Server) RegisterNamespace(ctx context.Context, req *pb.RegisterNamespac
 		return nil, status.Errorf(codes.Internal, "failed to register namespace: %v", err)
 	}
 
-	s.mu.Lock()
-	s.actuating[ns.Name] = s.clock.Now()
-	delete(s.affected, ns.Name)
-	delete(s.succeeded, ns.Name)
-	s.mu.Unlock()
+	s.markActuating(ns.Name)
 
 	return &pb.RegisterNamespaceResponse{
 		Name: ns.Name,
@@ -177,10 +181,7 @@ func (s *Server) PutVariable(ctx context.Context, req *pb.PutVariableRequest) (*
 			return nil, status.Errorf(codes.Internal, "failed to store variable: %v", err)
 		}
 
-		s.mu.Lock()
-		delete(s.actuating, v.Namespace)
-		s.succeeded[v.Namespace] = true
-		s.mu.Unlock()
+		s.markSucceeded(v.Namespace)
 
 		if err := s.propagateAffected(ctx, v.Namespace); err != nil {
 			log.Printf("[WARNING] failed to propagate affected state from %s: %v", v.Namespace, err)
@@ -204,10 +205,7 @@ func (s *Server) PutVariable(ctx context.Context, req *pb.PutVariableRequest) (*
 			go s.propagateChange(context.Background(), v.Namespace, v.Name)
 		}
 	} else {
-		s.mu.Lock()
-		delete(s.actuating, req.GetNamespace())
-		s.succeeded[req.GetNamespace()] = true
-		s.mu.Unlock()
+		s.markSucceeded(req.GetNamespace())
 	}
 
 	return &pb.PutVariableResponse{}, nil
@@ -725,6 +723,21 @@ func AuditInterceptor(store Store, clock clockwork.Clock) grpc.UnaryServerInterc
 	}
 }
 
+func (s *Server) markActuating(ns string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.actuating[ns] = s.clock.Now()
+	delete(s.affected, ns)
+	delete(s.succeeded, ns)
+}
+
+func (s *Server) markSucceeded(ns string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.actuating, ns)
+	s.succeeded[ns] = true
+}
+
 func (s *Server) propagateAffected(ctx context.Context, sourceNS string) error {
 	allDeps, err := s.store.GetAllDependencies(ctx)
 	if err != nil {
@@ -744,17 +757,7 @@ func (s *Server) propagateAffected(ctx context.Context, sourceNS string) error {
 	return nil
 }
 
-func (s *Server) hasActuatingOrAffectedAncestor(ctx context.Context, ns string, actuating map[string]time.Time, affected map[string]bool) (bool, error) {
-	allDeps, err := s.store.GetAllDependencies(ctx)
-	if err != nil {
-		return false, err
-	}
-
-	upstream := make(map[string][]string)
-	for _, d := range allDeps {
-		upstream[d.Consumer] = append(upstream[d.Consumer], d.Source)
-	}
-
+func (s *Server) hasActuatingAncestor(ns string, actuating map[string]time.Time, upstream map[string][]string) bool {
 	queue := []string{ns}
 	visited := make(map[string]bool)
 	visited[ns] = true
@@ -767,10 +770,7 @@ func (s *Server) hasActuatingOrAffectedAncestor(ctx context.Context, ns string, 
 
 		if !first {
 			if _, ok := actuating[curr]; ok {
-				return true, nil
-			}
-			if affected[curr] {
-				return true, nil
+				return true
 			}
 		}
 		first = false
@@ -783,27 +783,59 @@ func (s *Server) hasActuatingOrAffectedAncestor(ctx context.Context, ns string, 
 		}
 	}
 
-	return false, nil
+	return false
 }
 
 func (s *Server) handleTimeouts(ctx context.Context) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	candidates := make(map[string]time.Time)
+	for k, v := range s.actuating {
+		candidates[k] = v
+	}
+	s.mu.Unlock()
 
 	now := s.clock.Now()
 	timeout := 45 * time.Second
 
-	for ns, startTime := range s.actuating {
+	var toSucceed []string
+	for ns, startTime := range candidates {
 		if now.Sub(startTime) > timeout {
-			log.Printf("[INFO] Actuation for namespace %s timed out, marking as succeeded", ns)
-			delete(s.actuating, ns)
-			s.succeeded[ns] = true
+			hasVars, err := s.store.HasVariables(ctx, ns)
+			if err != nil {
+				log.Printf("[WARNING] failed to check if namespace %s has variables: %v", ns, err)
+				continue
+			}
+			if !hasVars {
+				toSucceed = append(toSucceed, ns)
+			}
 		}
+	}
+
+	if len(toSucceed) > 0 {
+		s.mu.Lock()
+		for _, ns := range toSucceed {
+			if _, ok := s.actuating[ns]; ok {
+				log.Printf("[INFO] Actuation for input-only namespace %s timed out, marking as succeeded", ns)
+				delete(s.actuating, ns)
+				s.succeeded[ns] = true
+			}
+		}
+		s.mu.Unlock()
 	}
 }
 
 func (s *Server) calculateStatuses(ctx context.Context, namespaces []string) (map[string]string, error) {
 	s.handleTimeouts(ctx)
+
+	allDeps, err := s.store.GetAllDependencies(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get dependencies for status calculation: %v", err)
+	}
+
+	upstream := make(map[string][]string)
+	for _, d := range allDeps {
+		upstream[d.Consumer] = append(upstream[d.Consumer], d.Source)
+	}
 
 	s.mu.Lock()
 	actuatingCopy := make(map[string]time.Time)
@@ -823,20 +855,16 @@ func (s *Server) calculateStatuses(ctx context.Context, namespaces []string) (ma
 	statuses := make(map[string]string)
 	for _, ns := range namespaces {
 		if _, ok := actuatingCopy[ns]; ok {
-			statuses[ns] = "actuating"
+			statuses[ns] = string(StatusActuating)
 		} else if affectedCopy[ns] {
-			statuses[ns] = "affected"
+			statuses[ns] = string(StatusAffected)
 		} else {
-			hasAncestor, err := s.hasActuatingOrAffectedAncestor(ctx, ns, actuatingCopy, affectedCopy)
-			if err != nil {
-				log.Printf("[WARNING] failed to check ancestors for %s: %v", ns, err)
-			}
-			if hasAncestor {
-				statuses[ns] = "potentially-affected"
+			if s.hasActuatingAncestor(ns, actuatingCopy, upstream) {
+				statuses[ns] = string(StatusPotentiallyAffected)
 			} else if succeededCopy[ns] {
-				statuses[ns] = "succeeded"
+				statuses[ns] = string(StatusSucceeded)
 			} else {
-				statuses[ns] = "idle"
+				statuses[ns] = string(StatusIdle)
 			}
 		}
 	}
