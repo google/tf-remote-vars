@@ -18,5 +18,5 @@ Below the source for the skills *hard-coded* here:
 [ponytail](./ponytail/ponytail-help/SKILL.md)
 
 ```txt
-/ponytail → /ponytail-review → /ponytail-audit
+/ponytail-review → /ponytail-audit
 ```
