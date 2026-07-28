@@ -147,7 +147,7 @@ terraform apply -auto-approve
 
 Open your browser and navigate to:
 
-`http://localhost:8081`
+[http://localhost:8081](http://localhost:8081)
 
 **What to look for in the UI:**
 1. **Interactive Dependency Graph:** You will see the visual representation of all 9 namespaces connected by directed edges indicating the variables flow (e.g. `bootstrap` &rarr; `tagging_service`).
