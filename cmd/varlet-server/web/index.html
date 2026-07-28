@@ -99,9 +99,36 @@
         let potentiallyAffectedNodes = new Set();
         let actuatedNodes = new Set();
 
-        document.getElementById('fetch-btn').addEventListener('click', fetchGraph);
+        document.getElementById('fetch-btn').addEventListener('click', () => fetchGraph(true));
         document.getElementById('sim-next-btn').addEventListener('click', nextSimStep);
         document.getElementById('sim-stop-btn').addEventListener('click', stopSimulation);
+
+        window.addEventListener('popstate', () => {
+            const params = new URLSearchParams(window.location.search);
+            document.getElementById('root-ns').value = params.get('root') || '';
+            document.getElementById('upstream-depth').value = params.get('upstream_depth') || '0';
+            fetchGraph(false);
+        });
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const params = new URLSearchParams(window.location.search);
+            const root = params.get('root');
+            const depth = params.get('upstream_depth');
+            if (root !== null) document.getElementById('root-ns').value = root;
+            if (depth !== null) document.getElementById('upstream-depth').value = depth;
+            fetchGraph(false);
+        });
+
+        function updateURL(root, depth) {
+            const params = new URLSearchParams();
+            if (root) params.set('root', root);
+            if (depth) params.set('upstream_depth', depth);
+            const queryString = params.toString();
+            const newUrl = window.location.pathname + (queryString ? '?' + queryString : '');
+            if (window.location.search !== (queryString ? '?' + queryString : '')) {
+                history.pushState(null, '', newUrl);
+            }
+        }
 
         function showMessage(text) {
             const container = document.getElementById('message-container');
@@ -118,7 +145,7 @@
             if (cyEl) cyEl.style.opacity = 1;
         }
 
-        function fetchGraph() {
+        function fetchGraph(pushHistory = true) {
             const root = document.getElementById('root-ns').value;
             const depth = document.getElementById('upstream-depth').value;
             let url = '/api/graph';
@@ -149,6 +176,9 @@
                     } else {
                         renderGraph(data);
                     }
+                    if (pushHistory) {
+                        updateURL(root, depth);
+                    }
                 })
                 .catch(err => {
                     if (err.status === 404) {
@@ -159,6 +189,9 @@
                     if (cy) {
                         cy.destroy();
                         cy = null;
+                    }
+                    if (pushHistory) {
+                        updateURL(root, depth);
                     }
                 });
         }
