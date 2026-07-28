@@ -14,6 +14,8 @@ import (
 	pb "github.com/google/varlet/proto/v1"
 	"github.com/jonboulle/clockwork"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -81,6 +83,10 @@ func main() {
 			UpstreamDepth: depth,
 		})
 		if err != nil {
+			if s, ok := status.FromError(err); ok && s.Code() == codes.NotFound {
+				http.Error(w, s.Message(), http.StatusNotFound)
+				return
+			}
 			http.Error(w, fmt.Sprintf("Failed to get graph: %v", err), http.StatusInternalServerError)
 			return
 		}

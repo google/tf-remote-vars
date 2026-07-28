@@ -81,7 +81,7 @@ Create or edit your `~/.terraformrc` file and add the following:
 ```hcl
 provider_installation {
   dev_overrides {
-    "google/varlet" = "/usr/local/google/home/gkandriotti/code/tf-remote-vars"
+    "google/varlet" = "/path/to/tf-remote-vars"
   }
   direct {}
 }

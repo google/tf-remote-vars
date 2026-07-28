@@ -30,7 +30,7 @@ func main() {
 	flag.Parse()
 
 	opts := providerserver.ServeOpts{
-		Address: "google/varlet",
+		Address: "registry.terraform.io/google/varlet",
 		Debug:   debug,
 	}
 
