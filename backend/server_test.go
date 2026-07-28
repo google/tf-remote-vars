@@ -480,6 +480,14 @@ func TestRegisterConsumerSuccess(t *testing.T) {
 		t.Fatalf("failed to put variable: %v", err)
 	}
 
+	_, err := server.SetNamespacePolicy(ctx, &pb.SetNamespacePolicyRequest{
+		Namespace:        "source-ns",
+		AllowedConsumers: []string{"consumer-ns"},
+	})
+	if err != nil {
+		t.Fatalf("failed to set namespace policy: %v", err)
+	}
+
 	req := &pb.RegisterConsumerRequest{
 		ConsumerNamespace: "consumer-ns",
 		SourceNamespace:   "source-ns",
@@ -530,6 +538,23 @@ func TestRegisterConsumerCycleDetection(t *testing.T) {
 		}
 		if err := store.PutVariable(ctx, v); err != nil {
 			t.Fatalf("failed to put variable in %s: %v", ns, err)
+		}
+	}
+
+	for _, policy := range []struct {
+		source   string
+		consumer string
+	}{
+		{source: "B", consumer: "A"},
+		{source: "C", consumer: "B"},
+		{source: "A", consumer: "C"},
+	} {
+		_, err := server.SetNamespacePolicy(ctx, &pb.SetNamespacePolicyRequest{
+			Namespace:        policy.source,
+			AllowedConsumers: []string{policy.consumer},
+		})
+		if err != nil {
+			t.Fatalf("failed to set namespace policy for %s -> %s: %v", policy.source, policy.consumer, err)
 		}
 	}
 
@@ -591,7 +616,15 @@ func TestGetVariableValueSuccess(t *testing.T) {
 		t.Fatalf("failed to put variable: %v", err)
 	}
 
-	_, err := server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+	_, err := server.SetNamespacePolicy(ctx, &pb.SetNamespacePolicyRequest{
+		Namespace:        "ns1",
+		AllowedConsumers: []string{"ns2"},
+	})
+	if err != nil {
+		t.Fatalf("failed to set namespace policy: %v", err)
+	}
+
+	_, err = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
 		ConsumerNamespace: "ns2",
 		SourceNamespace:   "ns1",
 		VariableName:     "var1",
@@ -682,7 +715,15 @@ func TestDeregisterConsumerSuccess(t *testing.T) {
 		t.Fatalf("failed to put variable: %v", err)
 	}
 
-	_, err := server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+	_, err := server.SetNamespacePolicy(ctx, &pb.SetNamespacePolicyRequest{
+		Namespace:        "ns1",
+		AllowedConsumers: []string{"ns2"},
+	})
+	if err != nil {
+		t.Fatalf("failed to set namespace policy: %v", err)
+	}
+
+	_, err = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
 		ConsumerNamespace: "ns2",
 		SourceNamespace:   "ns1",
 		VariableName:     "var1",
@@ -732,7 +773,14 @@ func TestDeleteVariableBlocked(t *testing.T) {
 	if err := store.PutVariable(ctx, v); err != nil {
 		t.Fatalf("failed to put variable: %v", err)
 	}
-	_, err := server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+	_, err := server.SetNamespacePolicy(ctx, &pb.SetNamespacePolicyRequest{
+		Namespace:        "ns1",
+		AllowedConsumers: []string{"ns2"},
+	})
+	if err != nil {
+		t.Fatalf("failed to set namespace policy: %v", err)
+	}
+	_, err = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
 		ConsumerNamespace: "ns2",
 		SourceNamespace:   "ns1",
 		VariableName:     "var1",
@@ -1024,6 +1072,22 @@ func TestGetDependencyGraph(t *testing.T) {
 	_, err = server.PutVariable(ctx, &pb.PutVariableRequest{Namespace: "B", Name: "var_b", Value: val})
 	if err != nil {
 		t.Fatalf("failed to put var_b: %v", err)
+	}
+
+	_, err = server.SetNamespacePolicy(ctx, &pb.SetNamespacePolicyRequest{
+		Namespace:        "B",
+		AllowedConsumers: []string{"A"},
+	})
+	if err != nil {
+		t.Fatalf("failed to set namespace policy B->A: %v", err)
+	}
+
+	_, err = server.SetNamespacePolicy(ctx, &pb.SetNamespacePolicyRequest{
+		Namespace:        "C",
+		AllowedConsumers: []string{"B"},
+	})
+	if err != nil {
+		t.Fatalf("failed to set namespace policy C->B: %v", err)
 	}
 
 	_, err = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
@@ -1335,6 +1399,14 @@ func TestWebhookPropagation(t *testing.T) {
 		t.Fatalf("failed to put variable: %v", err)
 	}
 
+	_, err = server.SetNamespacePolicy(ctx, &pb.SetNamespacePolicyRequest{
+		Namespace:        "source-ns",
+		AllowedConsumers: []string{"consumer-*"},
+	})
+	if err != nil {
+		t.Fatalf("failed to set namespace policy: %v", err)
+	}
+
 	for _, c := range []string{"consumer-1", "consumer-2", "consumer-3"} {
 		_, err = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
 			ConsumerNamespace: c,
@@ -1502,4 +1574,138 @@ func TestAuditInterceptor(t *testing.T) {
 		t.Errorf("unexpected details: %s", l2.Details)
 	}
 }
+
+func TestWebhookDelayPropagation(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	fakeClock := clockwork.NewFakeClock()
+	server := NewServerWithClock(store, fakeClock)
+
+	received := make(chan struct {
+		Consumer string
+		Source   string
+		Variable string
+	}, 10)
+
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		var payload struct {
+			ConsumerNamespace string `json:"consumer_namespace"`
+			SourceNamespace   string `json:"source_namespace"`
+			VariableName     string `json:"variable_name"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		received <- struct {
+			Consumer string
+			Source   string
+			Variable string
+		}{
+			Consumer: payload.ConsumerNamespace,
+			Source:   payload.SourceNamespace,
+			Variable: payload.VariableName,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer testServer.Close()
+
+	if err := store.RegisterNamespace(ctx, &Namespace{Name: "source-ns"}); err != nil {
+		t.Fatalf("failed to register source-ns: %v", err)
+	}
+	// Register consumer with a 5-minute webhook delay
+	err := store.RegisterNamespace(ctx, &Namespace{
+		Name:                "consumer-ns",
+		RunWebhookURL:       testServer.URL,
+		WebhookDelayMinutes: 5,
+	})
+	if err != nil {
+		t.Fatalf("failed to register consumer-ns: %v", err)
+	}
+
+	// Set policy
+	_, err = server.SetNamespacePolicy(ctx, &pb.SetNamespacePolicyRequest{
+		Namespace:        "source-ns",
+		AllowedConsumers: []string{"consumer-ns"},
+	})
+	if err != nil {
+		t.Fatalf("failed to set namespace policy: %v", err)
+	}
+
+	val, _ := structpb.NewValue("initial")
+	_, err = server.PutVariable(ctx, &pb.PutVariableRequest{
+		Namespace: "source-ns",
+		Name:      "var1",
+		Value:     val,
+	})
+	if err != nil {
+		t.Fatalf("failed to put variable: %v", err)
+	}
+
+	_, err = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+		ConsumerNamespace: "consumer-ns",
+		SourceNamespace:   "source-ns",
+		VariableName:     "var1",
+	})
+	if err != nil {
+		t.Fatalf("failed to register consumer: %v", err)
+	}
+
+	// Update variable to trigger webhook
+	val2, _ := structpb.NewValue("updated")
+	_, err = server.PutVariable(ctx, &pb.PutVariableRequest{
+		Namespace: "source-ns",
+		Name:      "var1",
+		Value:     val2,
+	})
+	if err != nil {
+		t.Fatalf("failed to update variable: %v", err)
+	}
+
+	// Verify that the webhook has not been triggered yet (since fake clock hasn't advanced)
+	select {
+	case event := <-received:
+		t.Fatalf("received webhook prematurely: %+v", event)
+	case <-time.After(100 * time.Millisecond):
+		// OK, expected to delay
+	}
+
+	// Advance clock by 4 minutes (still less than 5)
+	fakeClock.Advance(4 * time.Minute)
+
+	select {
+	case event := <-received:
+		t.Fatalf("received webhook prematurely at 4 minutes: %+v", event)
+	case <-time.After(100 * time.Millisecond):
+		// OK, expected to delay
+	}
+
+	// Advance clock by remaining 1 minute (making it 5 minutes total)
+	fakeClock.Advance(1 * time.Minute)
+
+	// Verify that we now receive the webhook
+	select {
+	case event := <-received:
+		if event.Consumer != "consumer-ns" || event.Source != "source-ns" || event.Variable != "var1" {
+			t.Errorf("unexpected event content: %+v", event)
+		}
+	case <-time.After(2 * time.Second): // Real time timeout
+		t.Fatalf("timeout waiting for delayed webhook after advancing clock")
+	}
+
+	// Ensure no extra webhooks
+	time.Sleep(50 * time.Millisecond)
+	select {
+	case event := <-received:
+		t.Errorf("received extra unexpected webhook: %+v", event)
+	default:
+		// OK
+	}
+}
+
 

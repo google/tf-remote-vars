@@ -19,6 +19,7 @@ type Namespace struct {
 	RunWebhookURL              string
 	RetentionPolicyMinVersions int32
 	RetentionPolicyMaxAgeDays  int32
+	WebhookDelayMinutes        int32
 	AllowedConsumers           []string
 }
 
@@ -108,7 +109,8 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		name TEXT PRIMARY KEY,
 		run_webhook_url TEXT,
 		retention_policy_min_versions INTEGER,
-		retention_policy_max_age_days INTEGER
+		retention_policy_max_age_days INTEGER,
+		webhook_delay_minutes INTEGER DEFAULT 0
 	);
 	CREATE TABLE IF NOT EXISTS namespace_policies (
 		namespace TEXT,
@@ -151,13 +153,14 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 
 // RegisterNamespace registers a new namespace.
 func (s *SQLiteStore) RegisterNamespace(ctx context.Context, ns *Namespace) error {
-	query := `INSERT INTO namespaces (name, run_webhook_url, retention_policy_min_versions, retention_policy_max_age_days) 
-              VALUES (?, ?, ?, ?)
+	query := `INSERT INTO namespaces (name, run_webhook_url, retention_policy_min_versions, retention_policy_max_age_days, webhook_delay_minutes) 
+              VALUES (?, ?, ?, ?, ?)
               ON CONFLICT(name) DO UPDATE SET
                   run_webhook_url = excluded.run_webhook_url,
                   retention_policy_min_versions = excluded.retention_policy_min_versions,
-                  retention_policy_max_age_days = excluded.retention_policy_max_age_days`
-	_, err := s.db.ExecContext(ctx, query, ns.Name, ns.RunWebhookURL, ns.RetentionPolicyMinVersions, ns.RetentionPolicyMaxAgeDays)
+                  retention_policy_max_age_days = excluded.retention_policy_max_age_days,
+                  webhook_delay_minutes = excluded.webhook_delay_minutes`
+	_, err := s.db.ExecContext(ctx, query, ns.Name, ns.RunWebhookURL, ns.RetentionPolicyMinVersions, ns.RetentionPolicyMaxAgeDays, ns.WebhookDelayMinutes)
 	if err != nil {
 		return fmt.Errorf("failed to register namespace: %w", err)
 	}
@@ -166,9 +169,9 @@ func (s *SQLiteStore) RegisterNamespace(ctx context.Context, ns *Namespace) erro
 
 // GetNamespace retrieves a namespace by name.
 func (s *SQLiteStore) GetNamespace(ctx context.Context, name string) (*Namespace, error) {
-	row := s.db.QueryRowContext(ctx, "SELECT name, run_webhook_url, retention_policy_min_versions, retention_policy_max_age_days FROM namespaces WHERE name = ?", name)
+	row := s.db.QueryRowContext(ctx, "SELECT name, run_webhook_url, retention_policy_min_versions, retention_policy_max_age_days, webhook_delay_minutes FROM namespaces WHERE name = ?", name)
 	var ns Namespace
-	err := row.Scan(&ns.Name, &ns.RunWebhookURL, &ns.RetentionPolicyMinVersions, &ns.RetentionPolicyMaxAgeDays)
+	err := row.Scan(&ns.Name, &ns.RunWebhookURL, &ns.RetentionPolicyMinVersions, &ns.RetentionPolicyMaxAgeDays, &ns.WebhookDelayMinutes)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound

@@ -33,11 +33,12 @@ type NamespaceResource struct {
 
 // NamespaceResourceModel describes the resource data model.
 type NamespaceResourceModel struct {
-	ID               types.String                 `tfsdk:"id"`
-	Name             types.String                 `tfsdk:"name"`
-	RunWebhookURL    types.String                 `tfsdk:"run_webhook_url"`
-	AllowedConsumers types.Set                    `tfsdk:"allowed_consumers"`
-	RetentionPolicy  *RetentionPolicyProductModel `tfsdk:"retention_policy"`
+	ID                  types.String                 `tfsdk:"id"`
+	Name                types.String                 `tfsdk:"name"`
+	RunWebhookURL       types.String                 `tfsdk:"run_webhook_url"`
+	WebhookDelayMinutes types.Int64                  `tfsdk:"webhook_delay_minutes"`
+	AllowedConsumers    types.Set                    `tfsdk:"allowed_consumers"`
+	RetentionPolicy     *RetentionPolicyProductModel `tfsdk:"retention_policy"`
 }
 
 type RetentionPolicyProductModel struct {
@@ -70,6 +71,12 @@ func (r *NamespaceResource) Schema(ctx context.Context, req resource.SchemaReque
 			"run_webhook_url": schema.StringAttribute{
 				Optional:            true,
 				MarkdownDescription: "The URL of the webhook to trigger on changes.",
+			},
+			"webhook_delay_minutes": schema.Int64Attribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(0),
+				MarkdownDescription: "Number of minutes to delay triggering the webhook on changes.",
 			},
 			"allowed_consumers": schema.SetAttribute{
 				ElementType:         types.StringType,
@@ -127,8 +134,9 @@ func (r *NamespaceResource) Create(ctx context.Context, req resource.CreateReque
 
 	// Register namespace
 	registerReq := &pb.RegisterNamespaceRequest{
-		Name:          data.Name.ValueString(),
-		RunWebhookUrl: data.RunWebhookURL.ValueString(),
+		Name:                data.Name.ValueString(),
+		RunWebhookUrl:       data.RunWebhookURL.ValueString(),
+		WebhookDelayMinutes: int32(data.WebhookDelayMinutes.ValueInt64()),
 	}
 	if data.RetentionPolicy != nil {
 		registerReq.RetentionPolicy = &pb.RetentionPolicy{
@@ -195,6 +203,12 @@ func (r *NamespaceResource) Read(ctx context.Context, req resource.ReadRequest, 
 		data.RunWebhookURL = types.StringValue(ns.GetRunWebhookUrl())
 	}
 
+	if ns.GetWebhookDelayMinutes() == 0 {
+		data.WebhookDelayMinutes = types.Int64Value(0)
+	} else {
+		data.WebhookDelayMinutes = types.Int64Value(int64(ns.GetWebhookDelayMinutes()))
+	}
+
 	if len(ns.GetAllowedConsumers()) > 0 {
 		allowedSet, diags := types.SetValueFrom(ctx, types.StringType, ns.GetAllowedConsumers())
 		resp.Diagnostics.Append(diags...)
@@ -230,8 +244,9 @@ func (r *NamespaceResource) Update(ctx context.Context, req resource.UpdateReque
 
 	// Register namespace (acts as upsert)
 	registerReq := &pb.RegisterNamespaceRequest{
-		Name:          data.Name.ValueString(),
-		RunWebhookUrl: data.RunWebhookURL.ValueString(),
+		Name:                data.Name.ValueString(),
+		RunWebhookUrl:       data.RunWebhookURL.ValueString(),
+		WebhookDelayMinutes: int32(data.WebhookDelayMinutes.ValueInt64()),
 	}
 	if data.RetentionPolicy != nil {
 		registerReq.RetentionPolicy = &pb.RetentionPolicy{

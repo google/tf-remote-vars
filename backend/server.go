@@ -55,8 +55,9 @@ func (s *Server) RegisterNamespace(ctx context.Context, req *pb.RegisterNamespac
 	}
 
 	ns := &Namespace{
-		Name:          req.GetName(),
-		RunWebhookURL: req.GetRunWebhookUrl(),
+		Name:                req.GetName(),
+		RunWebhookURL:       req.GetRunWebhookUrl(),
+		WebhookDelayMinutes: req.GetWebhookDelayMinutes(),
 	}
 	if req.GetRetentionPolicy() != nil {
 		ns.RetentionPolicyMinVersions = req.GetRetentionPolicy().GetMinVersions()
@@ -87,9 +88,10 @@ func (s *Server) GetNamespace(ctx context.Context, req *pb.GetNamespaceRequest) 
 	}
 
 	resp := &pb.GetNamespaceResponse{
-		Name:             ns.Name,
-		AllowedConsumers: ns.AllowedConsumers,
-		RunWebhookUrl:    ns.RunWebhookURL,
+		Name:                ns.Name,
+		AllowedConsumers:    ns.AllowedConsumers,
+		RunWebhookUrl:       ns.RunWebhookURL,
+		WebhookDelayMinutes: ns.WebhookDelayMinutes,
 	}
 	if ns.RetentionPolicyMinVersions > 0 || ns.RetentionPolicyMaxAgeDays > 0 {
 		resp.RetentionPolicy = &pb.RetentionPolicy{
@@ -395,9 +397,7 @@ func (s *Server) checkAccess(ctx context.Context, consumerNS, sourceNS string) e
 		return status.Errorf(codes.Internal, "failed to get source namespace: %v", err)
 	}
 
-	if len(ns.AllowedConsumers) == 0 {
-		return nil // Open by default
-	}
+
 
 	for _, pattern := range ns.AllowedConsumers {
 		matched, err := path.Match(pattern, consumerNS)
@@ -552,7 +552,12 @@ func (s *Server) propagateChange(ctx context.Context, sourceNS, varName string) 
 			continue
 		}
 
-		go s.callWebhook(ctx, ns.RunWebhookURL, consumerNS, sourceNS, varName)
+		go func(url string, cNS string, delay int32) {
+			if delay > 0 {
+				s.clock.Sleep(time.Duration(delay) * time.Minute)
+			}
+			s.callWebhook(ctx, url, cNS, sourceNS, varName)
+		}(ns.RunWebhookURL, consumerNS, ns.WebhookDelayMinutes)
 	}
 }
 

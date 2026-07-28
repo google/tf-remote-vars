@@ -35,6 +35,7 @@ message RegisterNamespaceRequest {
   string name = 1;
   RetentionPolicy retention_policy = 2;
   string run_webhook_url = 3;
+  int32 webhook_delay_minutes = 4;
 }
 
 message RegisterNamespaceResponse {
@@ -50,6 +51,7 @@ message GetNamespaceResponse {
   repeated string allowed_consumers = 2; // Allowlist of consumer namespaces (supports wildcards)
   RetentionPolicy retention_policy = 3;
   string run_webhook_url = 4;
+  int32 webhook_delay_minutes = 5;
 }
 
 message PutVariableRequest {

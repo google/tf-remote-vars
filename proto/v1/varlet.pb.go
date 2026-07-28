@@ -75,12 +75,13 @@ func (x *RetentionPolicy) GetMaxAgeDays() int32 {
 }
 
 type RegisterNamespaceRequest struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Name            string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	RetentionPolicy *RetentionPolicy       `protobuf:"bytes,2,opt,name=retention_policy,json=retentionPolicy,proto3" json:"retention_policy,omitempty"`
-	RunWebhookUrl   string                 `protobuf:"bytes,3,opt,name=run_webhook_url,json=runWebhookUrl,proto3" json:"run_webhook_url,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Name                string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	RetentionPolicy     *RetentionPolicy       `protobuf:"bytes,2,opt,name=retention_policy,json=retentionPolicy,proto3" json:"retention_policy,omitempty"`
+	RunWebhookUrl       string                 `protobuf:"bytes,3,opt,name=run_webhook_url,json=runWebhookUrl,proto3" json:"run_webhook_url,omitempty"`
+	WebhookDelayMinutes int32                  `protobuf:"varint,4,opt,name=webhook_delay_minutes,json=webhookDelayMinutes,proto3" json:"webhook_delay_minutes,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *RegisterNamespaceRequest) Reset() {
@@ -132,6 +133,13 @@ func (x *RegisterNamespaceRequest) GetRunWebhookUrl() string {
 		return x.RunWebhookUrl
 	}
 	return ""
+}
+
+func (x *RegisterNamespaceRequest) GetWebhookDelayMinutes() int32 {
+	if x != nil {
+		return x.WebhookDelayMinutes
+	}
+	return 0
 }
 
 type RegisterNamespaceResponse struct {
@@ -223,13 +231,14 @@ func (x *GetNamespaceRequest) GetName() string {
 }
 
 type GetNamespaceResponse struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	Name             string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	AllowedConsumers []string               `protobuf:"bytes,2,rep,name=allowed_consumers,json=allowedConsumers,proto3" json:"allowed_consumers,omitempty"` // Allowlist of consumer namespaces (supports wildcards)
-	RetentionPolicy  *RetentionPolicy       `protobuf:"bytes,3,opt,name=retention_policy,json=retentionPolicy,proto3" json:"retention_policy,omitempty"`
-	RunWebhookUrl    string                 `protobuf:"bytes,4,opt,name=run_webhook_url,json=runWebhookUrl,proto3" json:"run_webhook_url,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Name                string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	AllowedConsumers    []string               `protobuf:"bytes,2,rep,name=allowed_consumers,json=allowedConsumers,proto3" json:"allowed_consumers,omitempty"` // Allowlist of consumer namespaces (supports wildcards)
+	RetentionPolicy     *RetentionPolicy       `protobuf:"bytes,3,opt,name=retention_policy,json=retentionPolicy,proto3" json:"retention_policy,omitempty"`
+	RunWebhookUrl       string                 `protobuf:"bytes,4,opt,name=run_webhook_url,json=runWebhookUrl,proto3" json:"run_webhook_url,omitempty"`
+	WebhookDelayMinutes int32                  `protobuf:"varint,5,opt,name=webhook_delay_minutes,json=webhookDelayMinutes,proto3" json:"webhook_delay_minutes,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *GetNamespaceResponse) Reset() {
@@ -288,6 +297,13 @@ func (x *GetNamespaceResponse) GetRunWebhookUrl() string {
 		return x.RunWebhookUrl
 	}
 	return ""
+}
+
+func (x *GetNamespaceResponse) GetWebhookDelayMinutes() int32 {
+	if x != nil {
+		return x.WebhookDelayMinutes
+	}
+	return 0
 }
 
 type PutVariableRequest struct {
@@ -1070,20 +1086,22 @@ const file_proto_v1_varlet_proto_rawDesc = "" +
 	"\x0fRetentionPolicy\x12!\n" +
 	"\fmin_versions\x18\x01 \x01(\x05R\vminVersions\x12 \n" +
 	"\fmax_age_days\x18\x02 \x01(\x05R\n" +
-	"maxAgeDays\"\x9d\x01\n" +
+	"maxAgeDays\"\xd1\x01\n" +
 	"\x18RegisterNamespaceRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12E\n" +
 	"\x10retention_policy\x18\x02 \x01(\v2\x1a.varlet.v1.RetentionPolicyR\x0fretentionPolicy\x12&\n" +
-	"\x0frun_webhook_url\x18\x03 \x01(\tR\rrunWebhookUrl\"/\n" +
+	"\x0frun_webhook_url\x18\x03 \x01(\tR\rrunWebhookUrl\x122\n" +
+	"\x15webhook_delay_minutes\x18\x04 \x01(\x05R\x13webhookDelayMinutes\"/\n" +
 	"\x19RegisterNamespaceResponse\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\")\n" +
 	"\x13GetNamespaceRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"\xc6\x01\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"\xfa\x01\n" +
 	"\x14GetNamespaceResponse\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12+\n" +
 	"\x11allowed_consumers\x18\x02 \x03(\tR\x10allowedConsumers\x12E\n" +
 	"\x10retention_policy\x18\x03 \x01(\v2\x1a.varlet.v1.RetentionPolicyR\x0fretentionPolicy\x12&\n" +
-	"\x0frun_webhook_url\x18\x04 \x01(\tR\rrunWebhookUrl\"\x9d\x01\n" +
+	"\x0frun_webhook_url\x18\x04 \x01(\tR\rrunWebhookUrl\x122\n" +
+	"\x15webhook_delay_minutes\x18\x05 \x01(\x05R\x13webhookDelayMinutes\"\x9d\x01\n" +
 	"\x12PutVariableRequest\x12\x1c\n" +
 	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12,\n" +
