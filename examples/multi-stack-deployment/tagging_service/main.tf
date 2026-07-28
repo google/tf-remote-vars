@@ -4,6 +4,10 @@ terraform {
       source  = "google/varlet"
       version = "~> 1.0"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "0.14.0"
+    }
   }
 }
 
@@ -26,24 +30,29 @@ resource "varlet_namespace" "self" {
 resource "varlet_input" "org_id" {
   source_namespace = "bootstrap"
   name             = "organization_id"
-  depends_on       = [varlet_namespace.self]
+  depends_on = [varlet_namespace.self, time_sleep.wait_30_seconds]
 }
 
 resource "varlet_input" "deploy_id" {
   source_namespace = "bootstrap"
   name             = "deployment_id"
-  depends_on       = [varlet_namespace.self]
+  depends_on = [varlet_namespace.self, time_sleep.wait_30_seconds]
 }
 
 # Export tagging variables
 resource "varlet_output" "tag_keys" {
   name       = "tag_keys"
   value      = ["owner", "env", "billing_id"]
-  depends_on = [varlet_namespace.self]
+  depends_on = [varlet_namespace.self, time_sleep.wait_30_seconds]
 }
 
 resource "varlet_output" "env_tag" {
   name       = "environment_tag_value"
   value      = "production"
+  depends_on = [varlet_namespace.self, time_sleep.wait_30_seconds]
+}
+
+resource "time_sleep" "wait_30_seconds" {
   depends_on = [varlet_namespace.self]
+  create_duration = "30s"
 }

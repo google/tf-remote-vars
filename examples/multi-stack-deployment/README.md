@@ -101,46 +101,57 @@ Start the server. By default, this starts a gRPC server on port `8080` (for Terr
 Actuate the stacks in order of their dependencies. Since we have a delayed webhook, we can simulate manual actuation here. Open a separate terminal and apply them sequentially:
 
 ```bash
+export TF_CLI_CONFIG_FILE="$HOME/.terraformrc"
+
 # 1. Apply Bootstrap
-cd examples/multi-stack-deployment/bootstrap
+pushd examples/multi-stack-deployment/bootstrap
 terraform init
 terraform apply -auto-approve
+popd
 
 # 2. Apply Policy Engine & Tagging Service (parallel or order doesn't matter)
-cd ../policy_engine
+pushd examples/multi-stack-deployment/policy_engine
 terraform init
 terraform apply -auto-approve
+popd
 
-cd ../tagging_service
+pushd examples/multi-stack-deployment/tagging_service
 terraform init
 terraform apply -auto-approve
+popd
 
 # 3. Apply Security Tier 1 & 2
-cd ../security_tier_1
+pushd examples/multi-stack-deployment/security_tier_1
 terraform init
 terraform apply -auto-approve
+popd
 
-cd ../security_tier_2
+pushd examples/multi-stack-deployment/security_tier_2
 terraform init
 terraform apply -auto-approve
+popd
 
 # 4. Apply Lockdown Enforcer
-cd ../lockdown_enforcer
+pushd examples/multi-stack-deployment/lockdown_enforcer
 terraform init
 terraform apply -auto-approve
+popd
 
 # 5. Apply Regional Zones (US, EU, AP)
-cd ../regional_landing_zones/zone_us
+pushd examples/multi-stack-deployment/regional_landing_zones/zone_us
 terraform init
 terraform apply -auto-approve
+popd
 
-cd ../zone_eu
+pushd examples/multi-stack-deployment/zone_eu
 terraform init
 terraform apply -auto-approve
+popd
 
-cd ../zone_ap
+pushd examples/multi-stack-deployment/zone_ap
 terraform init
 terraform apply -auto-approve
+popd
 ```
 
 ### 5. Inspect the Web UI

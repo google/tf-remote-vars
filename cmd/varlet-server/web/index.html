@@ -72,7 +72,17 @@
     <div id="controls">
         <label>Root Namespace: <input type="text" id="root-ns" placeholder="e.g. app-prod"></label>
         <label>Upstream Depth: <input type="number" id="upstream-depth" value="0" min="-1" style="width: 50px;"></label>
-        <button id="fetch-btn">Fetch Graph</button>
+        <button id="fetch-btn">Refresh</button>
+        <label style="display: flex; align-items: center; gap: 5px; margin-left: 10px;">
+            <input type="checkbox" id="auto-refresh"> Auto Refresh
+        </label>
+        <select id="refresh-interval" disabled style="margin-left: 5px;">
+            <option value="10000">10 sec</option>
+            <option value="30000">30 sec</option>
+            <option value="60000">1 min</option>
+            <option value="600000">10 min</option>
+            <option value="3600000">1 hr</option>
+        </select>
         <div style="flex-grow: 1;"></div>
         <div style="display: flex;">
             <div class="legend-item"><div class="legend-color" style="background: #888;"></div> Idle</div>
@@ -99,9 +109,40 @@
         let potentiallyAffectedNodes = new Set();
         let actuatedNodes = new Set();
 
-        document.getElementById('fetch-btn').addEventListener('click', () => fetchGraph(true));
+        document.getElementById('fetch-btn').addEventListener('click', () => {
+            fetchGraph(true);
+            if (document.getElementById('auto-refresh').checked) {
+                handleAutoRefreshChange();
+            }
+        });
         document.getElementById('sim-next-btn').addEventListener('click', nextSimStep);
         document.getElementById('sim-stop-btn').addEventListener('click', stopSimulation);
+
+        let refreshIntervalId = null;
+        const autoRefreshCb = document.getElementById('auto-refresh');
+        const refreshIntervalSel = document.getElementById('refresh-interval');
+
+        autoRefreshCb.addEventListener('change', handleAutoRefreshChange);
+        refreshIntervalSel.addEventListener('change', handleAutoRefreshChange);
+
+        function handleAutoRefreshChange() {
+            const enabled = autoRefreshCb.checked;
+            refreshIntervalSel.disabled = !enabled;
+
+            if (refreshIntervalId) {
+                clearInterval(refreshIntervalId);
+                refreshIntervalId = null;
+            }
+
+            if (enabled) {
+                const interval = parseInt(refreshIntervalSel.value, 10);
+                refreshIntervalId = setInterval(() => {
+                    if (simState !== 'running') {
+                        fetchGraph(false);
+                    }
+                }, interval);
+            }
+        }
 
         window.addEventListener('popstate', () => {
             const params = new URLSearchParams(window.location.search);

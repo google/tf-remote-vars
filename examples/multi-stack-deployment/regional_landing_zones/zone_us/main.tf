@@ -4,6 +4,10 @@ terraform {
       source  = "google/varlet"
       version = "~> 1.0"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "0.14.0"
+    }
   }
 }
 
@@ -23,5 +27,10 @@ resource "varlet_namespace" "self" {
 resource "varlet_input" "lockdown" {
   source_namespace = "lockdown_enforcer"
   name             = "lockdown_status"
-  depends_on       = [varlet_namespace.self]
+  depends_on = [varlet_namespace.self, time_sleep.wait_30_seconds]
+}
+
+resource "time_sleep" "wait_30_seconds" {
+  depends_on = [varlet_namespace.self]
+  create_duration = "30s"
 }

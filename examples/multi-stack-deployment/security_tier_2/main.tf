@@ -4,6 +4,10 @@ terraform {
       source  = "google/varlet"
       version = "~> 1.0"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "0.14.0"
+    }
   }
 }
 
@@ -23,13 +27,13 @@ resource "varlet_namespace" "self" {
 resource "varlet_input" "tag_keys" {
   source_namespace = "tagging_service"
   name             = "tag_keys"
-  depends_on       = [varlet_namespace.self]
+  depends_on = [varlet_namespace.self, time_sleep.wait_30_seconds]
 }
 
 resource "varlet_input" "env_tag" {
   source_namespace = "tagging_service"
   name             = "environment_tag_value"
-  depends_on       = [varlet_namespace.self]
+  depends_on = [varlet_namespace.self, time_sleep.wait_30_seconds]
 }
 
 # Export maps of policy ids for levels 2, 3, 4
@@ -40,5 +44,10 @@ resource "varlet_output" "policy_ids" {
     level3 = "policy-harden-tier-3"
     level4 = "policy-lockdown-tier-4"
   }
+  depends_on = [varlet_namespace.self, time_sleep.wait_30_seconds]
+}
+
+resource "time_sleep" "wait_30_seconds" {
   depends_on = [varlet_namespace.self]
+  create_duration = "30s"
 }

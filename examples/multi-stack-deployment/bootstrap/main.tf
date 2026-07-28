@@ -4,6 +4,10 @@ terraform {
       source  = "google/varlet"
       version = "~> 1.0"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "0.14.0"
+    }
   }
 }
 
@@ -23,12 +27,17 @@ resource "varlet_namespace" "self" {
 resource "varlet_output" "organization_id" {
   name       = "organization_id"
   value      = "org-998877"
-  depends_on = [varlet_namespace.self]
+  depends_on = [varlet_namespace.self, time_sleep.wait_30_seconds]
 }
 
 # Export deployment_id. Must depend on namespace registration.
 resource "varlet_output" "deployment_id" {
   name       = "deployment_id"
   value      = "deploy-xyz-production"
+  depends_on = [varlet_namespace.self, time_sleep.wait_30_seconds]
+}
+
+resource "time_sleep" "wait_30_seconds" {
   depends_on = [varlet_namespace.self]
+  create_duration = "30s"
 }

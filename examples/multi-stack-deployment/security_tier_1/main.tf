@@ -4,6 +4,10 @@ terraform {
       source  = "google/varlet"
       version = "~> 1.0"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "0.14.0"
+    }
   }
 }
 
@@ -23,18 +27,23 @@ resource "varlet_namespace" "self" {
 resource "varlet_input" "tag_keys" {
   source_namespace = "tagging_service"
   name             = "tag_keys"
-  depends_on       = [varlet_namespace.self]
+  depends_on = [varlet_namespace.self, time_sleep.wait_30_seconds]
 }
 
 resource "varlet_input" "env_tag" {
   source_namespace = "tagging_service"
   name             = "environment_tag_value"
-  depends_on       = [varlet_namespace.self]
+  depends_on = [varlet_namespace.self, time_sleep.wait_30_seconds]
 }
 
 # Export security policy
 resource "varlet_output" "policy_id" {
   name       = "tier_1_policy_id"
   value      = "policy-standard-tier-1"
+  depends_on = [varlet_namespace.self, time_sleep.wait_30_seconds]
+}
+
+resource "time_sleep" "wait_30_seconds" {
   depends_on = [varlet_namespace.self]
+  create_duration = "30s"
 }
