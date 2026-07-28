@@ -28,3 +28,7 @@ The directed graph representing relationships between stacks. Nodes represent na
 
 **DAG (Directed Acyclic Graph)**:
 The required state of the Dependency Graph. The backend enforces that no cycles (loops) can be created (e.g., A depends on B, and B depends on A).
+
+**Actuation**:
+The process of applying changes to a Stack (typically via `terraform apply`). Actuating a stack may update its exported variables, which can affect downstream consumer stacks.
+
