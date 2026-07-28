@@ -116,6 +116,7 @@ message SetNamespacePolicyResponse {
 
 message GetDependencyGraphRequest {
   string namespace = 1; // Optional root namespace
+  int32 upstream_depth = 2; // Number of parent levels to include (default = 0)
 }
 
 message DependencyEdge {

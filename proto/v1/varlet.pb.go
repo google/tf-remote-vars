@@ -900,7 +900,8 @@ func (*SetNamespacePolicyResponse) Descriptor() ([]byte, []int) {
 
 type GetDependencyGraphRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Namespace     string                 `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"` // Optional root namespace
+	Namespace     string                 `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`                               // Optional root namespace
+	UpstreamDepth int32                  `protobuf:"varint,2,opt,name=upstream_depth,json=upstreamDepth,proto3" json:"upstream_depth,omitempty"` // Number of parent levels to include (default = 0)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -940,6 +941,13 @@ func (x *GetDependencyGraphRequest) GetNamespace() string {
 		return x.Namespace
 	}
 	return ""
+}
+
+func (x *GetDependencyGraphRequest) GetUpstreamDepth() int32 {
+	if x != nil {
+		return x.UpstreamDepth
+	}
+	return 0
 }
 
 type DependencyEdge struct {
@@ -1109,9 +1117,10 @@ const file_proto_v1_varlet_proto_rawDesc = "" +
 	"\x19SetNamespacePolicyRequest\x12\x1c\n" +
 	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12+\n" +
 	"\x11allowed_consumers\x18\x02 \x03(\tR\x10allowedConsumers\"\x1c\n" +
-	"\x1aSetNamespacePolicyResponse\"9\n" +
+	"\x1aSetNamespacePolicyResponse\"`\n" +
 	"\x19GetDependencyGraphRequest\x12\x1c\n" +
-	"\tnamespace\x18\x01 \x01(\tR\tnamespace\"\x8f\x01\n" +
+	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12%\n" +
+	"\x0eupstream_depth\x18\x02 \x01(\x05R\rupstreamDepth\"\x8f\x01\n" +
 	"\x0eDependencyEdge\x12-\n" +
 	"\x12consumer_namespace\x18\x01 \x01(\tR\x11consumerNamespace\x12)\n" +
 	"\x10source_namespace\x18\x02 \x01(\tR\x0fsourceNamespace\x12#\n" +

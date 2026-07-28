@@ -452,38 +452,75 @@ func (s *Server) GetDependencyGraph(ctx context.Context, req *pb.GetDependencyGr
 		return nil, status.Errorf(codes.NotFound, "root namespace %q not found", rootNS)
 	}
 
-	// Upstream traversal (ancestors)
-	adj := make(map[string][]string)
+	// Build adjacency maps
+	downstream := make(map[string][]string)
+	upstream := make(map[string][]string)
 	for _, d := range allDeps {
-		adj[d.Consumer] = append(adj[d.Consumer], d.Source)
+		downstream[d.Source] = append(downstream[d.Source], d.Consumer)
+		upstream[d.Consumer] = append(upstream[d.Consumer], d.Source)
 	}
 
-	visited := make(map[string]bool)
+	targetNodes := make(map[string]bool)
+	targetNodes[rootNS] = true
+
+	// 1. Find downstream descendants (unlimited depth)
 	queue := []string{rootNS}
-	visited[rootNS] = true
+	visitedDownstream := make(map[string]bool)
+	visitedDownstream[rootNS] = true
 
 	for len(queue) > 0 {
 		curr := queue[0]
 		queue = queue[1:]
 
-		for _, source := range adj[curr] {
-			if !visited[source] {
-				visited[source] = true
-				queue = append(queue, source)
+		for _, consumer := range downstream[curr] {
+			if !visitedDownstream[consumer] {
+				visitedDownstream[consumer] = true
+				targetNodes[consumer] = true
+				queue = append(queue, consumer)
 			}
 		}
 	}
 
+	// 2. Find upstream ancestors (limited to req.GetUpstreamDepth() unless < 0)
+	upstreamDepth := req.GetUpstreamDepth()
+	if upstreamDepth != 0 {
+		type queueItem struct {
+			node  string
+			depth int32
+		}
+		uQueue := []queueItem{{node: rootNS, depth: 0}}
+		visitedUpstream := make(map[string]bool)
+		visitedUpstream[rootNS] = true
+
+		for len(uQueue) > 0 {
+			curr := uQueue[0]
+			uQueue = uQueue[1:]
+
+			if upstreamDepth > 0 && curr.depth >= upstreamDepth {
+				continue
+			}
+
+			for _, source := range upstream[curr.node] {
+				if !visitedUpstream[source] {
+					visitedUpstream[source] = true
+					targetNodes[source] = true
+					uQueue = append(uQueue, queueItem{node: source, depth: curr.depth + 1})
+				}
+			}
+		}
+	}
+
+	// Filter namespaces and edges
 	var respNS []string
 	for _, ns := range allNS {
-		if visited[ns] {
+		if targetNodes[ns] {
 			respNS = append(respNS, ns)
 		}
 	}
 
 	var respEdges []*pb.DependencyEdge
 	for _, d := range allDeps {
-		if visited[d.Consumer] {
+		if targetNodes[d.Consumer] && targetNodes[d.Source] {
 			respEdges = append(respEdges, &pb.DependencyEdge{
 				ConsumerNamespace: d.Consumer,
 				SourceNamespace:   d.Source,

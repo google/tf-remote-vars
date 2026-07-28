@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Varlet Dependency Graph</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
+    <!-- dagre layout for hierarchical trees -->
+    <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre@2.5.0/cytoscape-dagre.min.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        #controls {
+            padding: 10px;
+            background: #f0f0f0;
+            border-bottom: 1px solid #ccc;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        #cy {
+            flex-grow: 1;
+            width: 100%;
+            height: 100%;
+        }
+        #sim-panel {
+            padding: 10px;
+            background: #e0e0e0;
+            border-top: 1px solid #ccc;
+            display: none;
+            gap: 10px;
+            align-items: center;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-right: 15px;
+        }
+        .legend-color {
+            width: 15px;
+            height: 15px;
+            border-radius: 3px;
+            border: 1px solid #666;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <label>Root Namespace: <input type="text" id="root-ns" placeholder="e.g. app-prod"></label>
+        <label>Upstream Depth: <input type="number" id="upstream-depth" value="0" min="-1" style="width: 50px;"></label>
+        <button id="fetch-btn">Fetch Graph</button>
+        <div style="flex-grow: 1;"></div>
+        <div style="display: flex;">
+            <div class="legend-item"><div class="legend-color" style="background: #888;"></div> Idle</div>
+            <div class="legend-item"><div class="legend-color" style="background: #ffa500;"></div> Affected</div>
+            <div class="legend-item"><div class="legend-color" style="background: #add8e6;"></div> Potentially Affected</div>
+            <div class="legend-item"><div class="legend-color" style="background: #ffff00;"></div> Actuating</div>
+            <div class="legend-item"><div class="legend-color" style="background: #90ee90;"></div> Succeeded</div>
+        </div>
+    </div>
+
+    <div id="cy"></div>
+
+    <div id="sim-panel">
+        <span id="sim-status">Simulation Mode</span>
+        <button id="sim-next-btn">Next Step</button>
+        <button id="sim-stop-btn">Stop Simulation</button>
+    </div>
+
+    <script>
+        let cy = null;
+        let simState = null; // 'idle', 'running'
+        let affectedNodes = new Set();
+        let potentiallyAffectedNodes = new Set();
+        let actuatedNodes = new Set();
+
+        document.getElementById('fetch-btn').addEventListener('click', fetchGraph);
+        document.getElementById('sim-next-btn').addEventListener('click', nextSimStep);
+        document.getElementById('sim-stop-btn').addEventListener('click', stopSimulation);
+
+        function fetchGraph() {
+            const root = document.getElementById('root-ns').value;
+            const depth = document.getElementById('upstream-depth').value;
+            let url = '/api/graph';
+            const params = [];
+            if (root) params.push(`root=${encodeURIComponent(root)}`);
+            if (depth) params.push(`upstream_depth=${depth}`);
+            if (params.length > 0) url += '?' + params.join('&');
+
+            fetch(url)
+                .then(r => {
+                    if (!r.ok) throw new Error('HTTP error ' + r.status);
+                    return r.json();
+                })
+                .then(data => {
+                    renderGraph(data);
+                })
+                .catch(err => {
+                    alert('Failed to fetch graph: ' + err.message);
+                });
+        }
+
+        function renderGraph(data) {
+            stopSimulation();
+
+            const elements = [];
+            
+            // Add nodes
+            if (data.namespaces) {
+                data.namespaces.forEach(ns => {
+                    elements.push({ data: { id: ns, label: ns } });
+                });
+            }
+
+            // Add edges (data flow: source -> consumer)
+            if (data.edges) {
+                data.edges.forEach((edge, idx) => {
+                    elements.push({
+                        data: {
+                            id: `e_${idx}`,
+                            source: edge.sourceNamespace,
+                            target: edge.consumerNamespace,
+                            label: edge.variableName
+                        }
+                    });
+                });
+            }
+
+            cy = cytoscape({
+                container: document.getElementById('cy'),
+                elements: elements,
+                boxSelectionEnabled: false,
+                autounselectify: true,
+                style: [
+                    {
+                        selector: 'node',
+                        style: {
+                            'background-color': '#888',
+                            'label': 'data(label)',
+                            'text-valign': 'center',
+                            'color': '#fff',
+                            'width': '100px',
+                            'height': '40px',
+                            'shape': 'round-rectangle',
+                            'font-size': '12px'
+                        }
+                    },
+                    {
+                        selector: 'edge',
+                        style: {
+                            'width': 2,
+                            'line-color': '#ccc',
+                            'target-arrow-color': '#ccc',
+                            'target-arrow-shape': 'triangle',
+                            'curve-style': 'bezier',
+                            'label': 'data(label)',
+                            'font-size': '10px',
+                            'text-rotation': 'autorotate',
+                            'text-margin-y': -10
+                        }
+                    },
+                    // Simulation styles
+                    {
+                        selector: 'node.affected',
+                        style: { 'background-color': '#ffa500', 'line-color': '#ffa500' }
+                    },
+                    {
+                        selector: 'node.potentially-affected',
+                        style: { 'background-color': '#add8e6', 'color': '#000' }
+                    },
+                    {
+                        selector: 'node.actuating',
+                        style: { 'background-color': '#ffff00', 'color': '#000' }
+                    },
+                    {
+                        selector: 'node.succeeded',
+                        style: { 'background-color': '#90ee90', 'color': '#000' }
+                    }
+                ],
+                layout: {
+                    name: 'dagre',
+                    nodeSep: 50,
+                    edgeSep: 10,
+                    rankSep: 100,
+                    rankDir: 'TB'
+                }
+            });
+
+            // Right click or long press to start simulation
+            cy.on('cxttap', 'node', function(evt){
+                const node = evt.target;
+                startSimulation(node.id());
+            });
+
+            // Double click to start simulation as well (easier for some)
+            cy.on('dblclick', 'node', function(evt){
+                const node = evt.target;
+                startSimulation(node.id());
+            });
+        }
+
+        function startSimulation(rootNodeId) {
+            stopSimulation();
+            simState = 'running';
+            document.getElementById('sim-panel').style.display = 'flex';
+            document.getElementById('sim-status').innerText = `Simulating actuation of ${rootNodeId}`;
+
+            affectedNodes = new Set([rootNodeId]);
+            potentiallyAffectedNodes = new Set();
+            actuatedNodes = new Set();
+
+            // Color initial node
+            cy.getElementById(rootNodeId).addClass('affected');
+        }
+
+        function nextSimStep() {
+            if (simState !== 'running') return;
+            if (affectedNodes.size === 0) {
+                document.getElementById('sim-status').innerText = 'Simulation finished. All affected stacks actuated.';
+                document.getElementById('sim-next-btn').disabled = true;
+                return;
+            }
+
+            document.getElementById('sim-next-btn').disabled = true;
+
+            const affected = cy.nodes('.affected');
+            affected.removeClass('affected').addClass('actuating');
+            affected.forEach(n => actuatedNodes.add(n.id()));
+            affectedNodes.clear();
+
+            // In a real animation we might wait a bit, but here we do it on next click or with a timeout.
+            // For step-by-step, we show "actuating" now, and compute next state.
+            
+            setTimeout(() => {
+                const actuating = cy.nodes('.actuating');
+                actuating.removeClass('actuating').addClass('succeeded');
+
+                actuating.forEach(node => {
+                    // Find outgoing edges (consumers)
+                    node.outgoers('edge').forEach(edge => {
+                        const consumer = edge.target();
+                        const consumerId = consumer.id();
+
+                        if (!actuatedNodes.has(consumerId)) {
+                            affectedNodes.add(consumerId);
+                            consumer.removeClass('potentially-affected').addClass('affected');
+
+                            // Find downstream of this consumer and mark as potentially affected
+                            consumer.successors('node').forEach(n => {
+                                if (!actuatedNodes.has(n.id()) && !affectedNodes.has(n.id()) && !potentiallyAffectedNodes.has(n.id())) {
+                                    potentiallyAffectedNodes.add(n.id());
+                                    n.addClass('potentially-affected');
+                                }
+                            });
+                        }
+                    });
+                });
+
+                // Update status text
+                if (affectedNodes.size > 0) {
+                    const nextNodes = Array.from(affectedNodes).join(', ');
+                    document.getElementById('sim-status').innerText = `Next to actuate: ${nextNodes}`;
+                } else {
+                    document.getElementById('sim-status').innerText = 'Next step will finish simulation.';
+                }
+                document.getElementById('sim-next-btn').disabled = false;
+            }, 500); // 500ms delay to show actuating state
+        }
+
+        function stopSimulation() {
+            simState = null;
+            document.getElementById('sim-panel').style.display = 'none';
+            document.getElementById('sim-next-btn').disabled = false;
+            
+            if (cy) {
+                cy.nodes().removeClass('affected potentially-affected actuating succeeded');
+            }
+            affectedNodes.clear();
+            potentiallyAffectedNodes.clear();
+            actuatedNodes.clear();
+        }
+    </script>
+</body>
+</html>
