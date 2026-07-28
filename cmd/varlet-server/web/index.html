@@ -245,7 +245,11 @@
             // Add nodes
             if (data.namespaces) {
                 data.namespaces.forEach(ns => {
-                    elements.push({ data: { id: ns, label: ns } });
+                    const status = (data.statuses && data.statuses[ns]) || 'idle';
+                    elements.push({ 
+                        data: { id: ns, label: ns },
+                        classes: status
+                    });
                 });
             }
 

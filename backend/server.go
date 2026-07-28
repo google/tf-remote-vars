@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"path"
+	"sync"
 	"time"
 
 	pb "github.com/google/varlet/proto/v1"
@@ -30,21 +31,32 @@ type Server struct {
 	pb.UnimplementedVarletServiceServer
 	store Store
 	clock clockwork.Clock
+
+	mu        sync.Mutex
+	actuating map[string]time.Time
+	affected  map[string]bool
+	succeeded map[string]bool
 }
 
 // NewServer creates a new Server with a real clock.
 func NewServer(store Store) *Server {
 	return &Server{
-		store: store,
-		clock: clockwork.NewRealClock(),
+		store:     store,
+		clock:     clockwork.NewRealClock(),
+		actuating: make(map[string]time.Time),
+		affected:  make(map[string]bool),
+		succeeded: make(map[string]bool),
 	}
 }
 
 // NewServerWithClock creates a new Server with a custom clock.
 func NewServerWithClock(store Store, clock clockwork.Clock) *Server {
 	return &Server{
-		store: store,
-		clock: clock,
+		store:     store,
+		clock:     clock,
+		actuating: make(map[string]time.Time),
+		affected:  make(map[string]bool),
+		succeeded: make(map[string]bool),
 	}
 }
 
@@ -71,6 +83,12 @@ func (s *Server) RegisterNamespace(ctx context.Context, req *pb.RegisterNamespac
 	if err := s.store.RegisterNamespace(ctx, ns); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to register namespace: %v", err)
 	}
+
+	s.mu.Lock()
+	s.actuating[ns.Name] = s.clock.Now()
+	delete(s.affected, ns.Name)
+	delete(s.succeeded, ns.Name)
+	s.mu.Unlock()
 
 	return &pb.RegisterNamespaceResponse{
 		Name: ns.Name,
@@ -159,6 +177,15 @@ func (s *Server) PutVariable(ctx context.Context, req *pb.PutVariableRequest) (*
 			return nil, status.Errorf(codes.Internal, "failed to store variable: %v", err)
 		}
 
+		s.mu.Lock()
+		delete(s.actuating, v.Namespace)
+		s.succeeded[v.Namespace] = true
+		s.mu.Unlock()
+
+		if err := s.propagateAffected(ctx, v.Namespace); err != nil {
+			log.Printf("[WARNING] failed to propagate affected state from %s: %v", v.Namespace, err)
+		}
+
 		// Enforce retention policy
 		ns, err := s.store.GetNamespace(ctx, req.GetNamespace())
 		if err != nil {
@@ -176,6 +203,11 @@ func (s *Server) PutVariable(ctx context.Context, req *pb.PutVariableRequest) (*
 		if err == nil && hasCons {
 			go s.propagateChange(context.Background(), v.Namespace, v.Name)
 		}
+	} else {
+		s.mu.Lock()
+		delete(s.actuating, req.GetNamespace())
+		s.succeeded[req.GetNamespace()] = true
+		s.mu.Unlock()
 	}
 
 	return &pb.PutVariableResponse{}, nil
@@ -442,9 +474,14 @@ func (s *Server) GetDependencyGraph(ctx context.Context, req *pb.GetDependencyGr
 				VariableName:     d.Variable,
 			}
 		}
+		statuses, err := s.calculateStatuses(ctx, allNS)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to calculate statuses: %v", err)
+		}
 		return &pb.GetDependencyGraphResponse{
 			Namespaces: allNS,
 			Edges:      respEdges,
+			Statuses:   statuses,
 		}, nil
 	}
 
@@ -536,9 +573,15 @@ func (s *Server) GetDependencyGraph(ctx context.Context, req *pb.GetDependencyGr
 		}
 	}
 
+	statuses, err := s.calculateStatuses(ctx, respNS)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to calculate statuses: %v", err)
+	}
+
 	return &pb.GetDependencyGraphResponse{
 		Namespaces: respNS,
 		Edges:      respEdges,
+		Statuses:   statuses,
 	}, nil
 }
 
@@ -680,5 +723,123 @@ func AuditInterceptor(store Store, clock clockwork.Clock) grpc.UnaryServerInterc
 
 		return resp, err
 	}
+}
+
+func (s *Server) propagateAffected(ctx context.Context, sourceNS string) error {
+	allDeps, err := s.store.GetAllDependencies(ctx)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, d := range allDeps {
+		if d.Source == sourceNS {
+			s.affected[d.Consumer] = true
+			delete(s.succeeded, d.Consumer)
+		}
+	}
+
+	return nil
+}
+
+func (s *Server) hasActuatingOrAffectedAncestor(ctx context.Context, ns string, actuating map[string]time.Time, affected map[string]bool) (bool, error) {
+	allDeps, err := s.store.GetAllDependencies(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	upstream := make(map[string][]string)
+	for _, d := range allDeps {
+		upstream[d.Consumer] = append(upstream[d.Consumer], d.Source)
+	}
+
+	queue := []string{ns}
+	visited := make(map[string]bool)
+	visited[ns] = true
+
+	first := true
+
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+
+		if !first {
+			if _, ok := actuating[curr]; ok {
+				return true, nil
+			}
+			if affected[curr] {
+				return true, nil
+			}
+		}
+		first = false
+
+		for _, parent := range upstream[curr] {
+			if !visited[parent] {
+				visited[parent] = true
+				queue = append(queue, parent)
+			}
+		}
+	}
+
+	return false, nil
+}
+
+func (s *Server) handleTimeouts(ctx context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := s.clock.Now()
+	timeout := 45 * time.Second
+
+	for ns, startTime := range s.actuating {
+		if now.Sub(startTime) > timeout {
+			log.Printf("[INFO] Actuation for namespace %s timed out, marking as succeeded", ns)
+			delete(s.actuating, ns)
+			s.succeeded[ns] = true
+		}
+	}
+}
+
+func (s *Server) calculateStatuses(ctx context.Context, namespaces []string) (map[string]string, error) {
+	s.handleTimeouts(ctx)
+
+	s.mu.Lock()
+	actuatingCopy := make(map[string]time.Time)
+	for k, v := range s.actuating {
+		actuatingCopy[k] = v
+	}
+	affectedCopy := make(map[string]bool)
+	for k, v := range s.affected {
+		affectedCopy[k] = v
+	}
+	succeededCopy := make(map[string]bool)
+	for k, v := range s.succeeded {
+		succeededCopy[k] = v
+	}
+	s.mu.Unlock()
+
+	statuses := make(map[string]string)
+	for _, ns := range namespaces {
+		if _, ok := actuatingCopy[ns]; ok {
+			statuses[ns] = "actuating"
+		} else if affectedCopy[ns] {
+			statuses[ns] = "affected"
+		} else {
+			hasAncestor, err := s.hasActuatingOrAffectedAncestor(ctx, ns, actuatingCopy, affectedCopy)
+			if err != nil {
+				log.Printf("[WARNING] failed to check ancestors for %s: %v", ns, err)
+			}
+			if hasAncestor {
+				statuses[ns] = "potentially-affected"
+			} else if succeededCopy[ns] {
+				statuses[ns] = "succeeded"
+			} else {
+				statuses[ns] = "idle"
+			}
+		}
+	}
+	return statuses, nil
 }
 

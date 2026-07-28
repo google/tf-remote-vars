@@ -1030,6 +1030,7 @@ type GetDependencyGraphResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Namespaces    []string               `protobuf:"bytes,1,rep,name=namespaces,proto3" json:"namespaces,omitempty"`
 	Edges         []*DependencyEdge      `protobuf:"bytes,2,rep,name=edges,proto3" json:"edges,omitempty"`
+	Statuses      map[string]string      `protobuf:"bytes,3,rep,name=statuses,proto3" json:"statuses,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // namespace name -> status string
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1074,6 +1075,13 @@ func (x *GetDependencyGraphResponse) GetNamespaces() []string {
 func (x *GetDependencyGraphResponse) GetEdges() []*DependencyEdge {
 	if x != nil {
 		return x.Edges
+	}
+	return nil
+}
+
+func (x *GetDependencyGraphResponse) GetStatuses() map[string]string {
+	if x != nil {
+		return x.Statuses
 	}
 	return nil
 }
@@ -1142,12 +1150,16 @@ const file_proto_v1_varlet_proto_rawDesc = "" +
 	"\x0eDependencyEdge\x12-\n" +
 	"\x12consumer_namespace\x18\x01 \x01(\tR\x11consumerNamespace\x12)\n" +
 	"\x10source_namespace\x18\x02 \x01(\tR\x0fsourceNamespace\x12#\n" +
-	"\rvariable_name\x18\x03 \x01(\tR\fvariableName\"m\n" +
+	"\rvariable_name\x18\x03 \x01(\tR\fvariableName\"\xfb\x01\n" +
 	"\x1aGetDependencyGraphResponse\x12\x1e\n" +
 	"\n" +
 	"namespaces\x18\x01 \x03(\tR\n" +
 	"namespaces\x12/\n" +
-	"\x05edges\x18\x02 \x03(\v2\x19.varlet.v1.DependencyEdgeR\x05edges2\xc8\x06\n" +
+	"\x05edges\x18\x02 \x03(\v2\x19.varlet.v1.DependencyEdgeR\x05edges\x12O\n" +
+	"\bstatuses\x18\x03 \x03(\v23.varlet.v1.GetDependencyGraphResponse.StatusesEntryR\bstatuses\x1a;\n" +
+	"\rStatusesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x012\xc8\x06\n" +
 	"\rVarletService\x12^\n" +
 	"\x11RegisterNamespace\x12#.varlet.v1.RegisterNamespaceRequest\x1a$.varlet.v1.RegisterNamespaceResponse\x12O\n" +
 	"\fGetNamespace\x12\x1e.varlet.v1.GetNamespaceRequest\x1a\x1f.varlet.v1.GetNamespaceResponse\x12a\n" +
@@ -1171,7 +1183,7 @@ func file_proto_v1_varlet_proto_rawDescGZIP() []byte {
 	return file_proto_v1_varlet_proto_rawDescData
 }
 
-var file_proto_v1_varlet_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_proto_v1_varlet_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_proto_v1_varlet_proto_goTypes = []any{
 	(*RetentionPolicy)(nil),            // 0: varlet.v1.RetentionPolicy
 	(*RegisterNamespaceRequest)(nil),   // 1: varlet.v1.RegisterNamespaceRequest
@@ -1193,38 +1205,40 @@ var file_proto_v1_varlet_proto_goTypes = []any{
 	(*GetDependencyGraphRequest)(nil),  // 17: varlet.v1.GetDependencyGraphRequest
 	(*DependencyEdge)(nil),             // 18: varlet.v1.DependencyEdge
 	(*GetDependencyGraphResponse)(nil), // 19: varlet.v1.GetDependencyGraphResponse
-	(*structpb.Value)(nil),             // 20: google.protobuf.Value
+	nil,                                // 20: varlet.v1.GetDependencyGraphResponse.StatusesEntry
+	(*structpb.Value)(nil),             // 21: google.protobuf.Value
 }
 var file_proto_v1_varlet_proto_depIdxs = []int32{
 	0,  // 0: varlet.v1.RegisterNamespaceRequest.retention_policy:type_name -> varlet.v1.RetentionPolicy
 	0,  // 1: varlet.v1.GetNamespaceResponse.retention_policy:type_name -> varlet.v1.RetentionPolicy
-	20, // 2: varlet.v1.PutVariableRequest.value:type_name -> google.protobuf.Value
-	20, // 3: varlet.v1.RegisterConsumerResponse.value:type_name -> google.protobuf.Value
-	20, // 4: varlet.v1.GetVariableValueResponse.value:type_name -> google.protobuf.Value
+	21, // 2: varlet.v1.PutVariableRequest.value:type_name -> google.protobuf.Value
+	21, // 3: varlet.v1.RegisterConsumerResponse.value:type_name -> google.protobuf.Value
+	21, // 4: varlet.v1.GetVariableValueResponse.value:type_name -> google.protobuf.Value
 	18, // 5: varlet.v1.GetDependencyGraphResponse.edges:type_name -> varlet.v1.DependencyEdge
-	1,  // 6: varlet.v1.VarletService.RegisterNamespace:input_type -> varlet.v1.RegisterNamespaceRequest
-	3,  // 7: varlet.v1.VarletService.GetNamespace:input_type -> varlet.v1.GetNamespaceRequest
-	15, // 8: varlet.v1.VarletService.SetNamespacePolicy:input_type -> varlet.v1.SetNamespacePolicyRequest
-	5,  // 9: varlet.v1.VarletService.PutVariable:input_type -> varlet.v1.PutVariableRequest
-	7,  // 10: varlet.v1.VarletService.DeleteVariable:input_type -> varlet.v1.DeleteVariableRequest
-	9,  // 11: varlet.v1.VarletService.RegisterConsumer:input_type -> varlet.v1.RegisterConsumerRequest
-	11, // 12: varlet.v1.VarletService.DeregisterConsumer:input_type -> varlet.v1.DeregisterConsumerRequest
-	13, // 13: varlet.v1.VarletService.GetVariableValue:input_type -> varlet.v1.GetVariableValueRequest
-	17, // 14: varlet.v1.VarletService.GetDependencyGraph:input_type -> varlet.v1.GetDependencyGraphRequest
-	2,  // 15: varlet.v1.VarletService.RegisterNamespace:output_type -> varlet.v1.RegisterNamespaceResponse
-	4,  // 16: varlet.v1.VarletService.GetNamespace:output_type -> varlet.v1.GetNamespaceResponse
-	16, // 17: varlet.v1.VarletService.SetNamespacePolicy:output_type -> varlet.v1.SetNamespacePolicyResponse
-	6,  // 18: varlet.v1.VarletService.PutVariable:output_type -> varlet.v1.PutVariableResponse
-	8,  // 19: varlet.v1.VarletService.DeleteVariable:output_type -> varlet.v1.DeleteVariableResponse
-	10, // 20: varlet.v1.VarletService.RegisterConsumer:output_type -> varlet.v1.RegisterConsumerResponse
-	12, // 21: varlet.v1.VarletService.DeregisterConsumer:output_type -> varlet.v1.DeregisterConsumerResponse
-	14, // 22: varlet.v1.VarletService.GetVariableValue:output_type -> varlet.v1.GetVariableValueResponse
-	19, // 23: varlet.v1.VarletService.GetDependencyGraph:output_type -> varlet.v1.GetDependencyGraphResponse
-	15, // [15:24] is the sub-list for method output_type
-	6,  // [6:15] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	20, // 6: varlet.v1.GetDependencyGraphResponse.statuses:type_name -> varlet.v1.GetDependencyGraphResponse.StatusesEntry
+	1,  // 7: varlet.v1.VarletService.RegisterNamespace:input_type -> varlet.v1.RegisterNamespaceRequest
+	3,  // 8: varlet.v1.VarletService.GetNamespace:input_type -> varlet.v1.GetNamespaceRequest
+	15, // 9: varlet.v1.VarletService.SetNamespacePolicy:input_type -> varlet.v1.SetNamespacePolicyRequest
+	5,  // 10: varlet.v1.VarletService.PutVariable:input_type -> varlet.v1.PutVariableRequest
+	7,  // 11: varlet.v1.VarletService.DeleteVariable:input_type -> varlet.v1.DeleteVariableRequest
+	9,  // 12: varlet.v1.VarletService.RegisterConsumer:input_type -> varlet.v1.RegisterConsumerRequest
+	11, // 13: varlet.v1.VarletService.DeregisterConsumer:input_type -> varlet.v1.DeregisterConsumerRequest
+	13, // 14: varlet.v1.VarletService.GetVariableValue:input_type -> varlet.v1.GetVariableValueRequest
+	17, // 15: varlet.v1.VarletService.GetDependencyGraph:input_type -> varlet.v1.GetDependencyGraphRequest
+	2,  // 16: varlet.v1.VarletService.RegisterNamespace:output_type -> varlet.v1.RegisterNamespaceResponse
+	4,  // 17: varlet.v1.VarletService.GetNamespace:output_type -> varlet.v1.GetNamespaceResponse
+	16, // 18: varlet.v1.VarletService.SetNamespacePolicy:output_type -> varlet.v1.SetNamespacePolicyResponse
+	6,  // 19: varlet.v1.VarletService.PutVariable:output_type -> varlet.v1.PutVariableResponse
+	8,  // 20: varlet.v1.VarletService.DeleteVariable:output_type -> varlet.v1.DeleteVariableResponse
+	10, // 21: varlet.v1.VarletService.RegisterConsumer:output_type -> varlet.v1.RegisterConsumerResponse
+	12, // 22: varlet.v1.VarletService.DeregisterConsumer:output_type -> varlet.v1.DeregisterConsumerResponse
+	14, // 23: varlet.v1.VarletService.GetVariableValue:output_type -> varlet.v1.GetVariableValueResponse
+	19, // 24: varlet.v1.VarletService.GetDependencyGraph:output_type -> varlet.v1.GetDependencyGraphResponse
+	16, // [16:25] is the sub-list for method output_type
+	7,  // [7:16] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_proto_v1_varlet_proto_init() }
@@ -1238,7 +1252,7 @@ func file_proto_v1_varlet_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_v1_varlet_proto_rawDesc), len(file_proto_v1_varlet_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   20,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

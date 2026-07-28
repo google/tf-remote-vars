@@ -130,4 +130,5 @@ message DependencyEdge {
 message GetDependencyGraphResponse {
   repeated string namespaces = 1;
   repeated DependencyEdge edges = 2;
+  map<string, string> statuses = 3; // namespace name -> status string
 }
