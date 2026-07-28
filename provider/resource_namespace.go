@@ -203,11 +203,7 @@ func (r *NamespaceResource) Read(ctx context.Context, req resource.ReadRequest, 
 		data.RunWebhookURL = types.StringValue(ns.GetRunWebhookUrl())
 	}
 
-	if ns.GetWebhookDelayMinutes() == 0 {
-		data.WebhookDelayMinutes = types.Int64Value(0)
-	} else {
-		data.WebhookDelayMinutes = types.Int64Value(int64(ns.GetWebhookDelayMinutes()))
-	}
+	data.WebhookDelayMinutes = types.Int64Value(int64(ns.GetWebhookDelayMinutes()))
 
 	if len(ns.GetAllowedConsumers()) > 0 {
 		allowedSet, diags := types.SetValueFrom(ctx, types.StringType, ns.GetAllowedConsumers())

@@ -113,6 +113,29 @@ func TestRegisterNamespaceError(t *testing.T) {
 			t.Errorf("expected updated webhook URL 'http://second', got %q", ns.RunWebhookURL)
 		}
 	})
+
+	t.Run("NegativeDelay", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+		store := newTestStore(t)
+		server := NewServer(store)
+
+		req := &pb.RegisterNamespaceRequest{
+			Name:                "invalid-ns",
+			WebhookDelayMinutes: -1,
+		}
+		_, err := server.RegisterNamespace(ctx, req)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		st, ok := status.FromError(err)
+		if !ok {
+			t.Fatalf("expected gRPC status error, got %v", err)
+		}
+		if st.Code() != codes.InvalidArgument {
+			t.Errorf("expected code %v, got %v", codes.InvalidArgument, st.Code())
+		}
+	})
 }
 
 func TestGetNamespaceSuccess(t *testing.T) {
@@ -1618,7 +1641,6 @@ func TestWebhookDelayPropagation(t *testing.T) {
 	if err := store.RegisterNamespace(ctx, &Namespace{Name: "source-ns"}); err != nil {
 		t.Fatalf("failed to register source-ns: %v", err)
 	}
-	// Register consumer with a 5-minute webhook delay
 	err := store.RegisterNamespace(ctx, &Namespace{
 		Name:                "consumer-ns",
 		RunWebhookURL:       testServer.URL,
@@ -1628,7 +1650,6 @@ func TestWebhookDelayPropagation(t *testing.T) {
 		t.Fatalf("failed to register consumer-ns: %v", err)
 	}
 
-	// Set policy
 	_, err = server.SetNamespacePolicy(ctx, &pb.SetNamespacePolicyRequest{
 		Namespace:        "source-ns",
 		AllowedConsumers: []string{"consumer-ns"},
@@ -1656,7 +1677,6 @@ func TestWebhookDelayPropagation(t *testing.T) {
 		t.Fatalf("failed to register consumer: %v", err)
 	}
 
-	// Update variable to trigger webhook
 	val2, _ := structpb.NewValue("updated")
 	_, err = server.PutVariable(ctx, &pb.PutVariableRequest{
 		Namespace: "source-ns",
@@ -1667,44 +1687,36 @@ func TestWebhookDelayPropagation(t *testing.T) {
 		t.Fatalf("failed to update variable: %v", err)
 	}
 
-	// Verify that the webhook has not been triggered yet (since fake clock hasn't advanced)
 	select {
 	case event := <-received:
 		t.Fatalf("received webhook prematurely: %+v", event)
 	case <-time.After(100 * time.Millisecond):
-		// OK, expected to delay
 	}
 
-	// Advance clock by 4 minutes (still less than 5)
 	fakeClock.Advance(4 * time.Minute)
 
 	select {
 	case event := <-received:
 		t.Fatalf("received webhook prematurely at 4 minutes: %+v", event)
 	case <-time.After(100 * time.Millisecond):
-		// OK, expected to delay
 	}
 
-	// Advance clock by remaining 1 minute (making it 5 minutes total)
 	fakeClock.Advance(1 * time.Minute)
 
-	// Verify that we now receive the webhook
 	select {
 	case event := <-received:
 		if event.Consumer != "consumer-ns" || event.Source != "source-ns" || event.Variable != "var1" {
 			t.Errorf("unexpected event content: %+v", event)
 		}
-	case <-time.After(2 * time.Second): // Real time timeout
+	case <-time.After(2 * time.Second):
 		t.Fatalf("timeout waiting for delayed webhook after advancing clock")
 	}
 
-	// Ensure no extra webhooks
 	time.Sleep(50 * time.Millisecond)
 	select {
 	case event := <-received:
 		t.Errorf("received extra unexpected webhook: %+v", event)
 	default:
-		// OK
 	}
 }
 

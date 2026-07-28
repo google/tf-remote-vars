@@ -54,6 +54,10 @@ func (s *Server) RegisterNamespace(ctx context.Context, req *pb.RegisterNamespac
 		return nil, status.Error(codes.InvalidArgument, "namespace name cannot be empty")
 	}
 
+	if req.GetWebhookDelayMinutes() < 0 {
+		return nil, status.Error(codes.InvalidArgument, "webhook delay minutes cannot be negative")
+	}
+
 	ns := &Namespace{
 		Name:                req.GetName(),
 		RunWebhookURL:       req.GetRunWebhookUrl(),
@@ -400,6 +404,9 @@ func (s *Server) checkAccess(ctx context.Context, consumerNS, sourceNS string) e
 
 
 	for _, pattern := range ns.AllowedConsumers {
+		if pattern == "*" {
+			return nil
+		}
 		matched, err := path.Match(pattern, consumerNS)
 		if err != nil {
 			continue
@@ -552,16 +559,14 @@ func (s *Server) propagateChange(ctx context.Context, sourceNS, varName string) 
 			continue
 		}
 
-		go func(url string, cNS string, delay int32) {
-			if delay > 0 {
-				s.clock.Sleep(time.Duration(delay) * time.Minute)
-			}
-			s.callWebhook(ctx, url, cNS, sourceNS, varName)
-		}(ns.RunWebhookURL, consumerNS, ns.WebhookDelayMinutes)
+		go s.callWebhook(ctx, ns.RunWebhookURL, consumerNS, sourceNS, varName, ns.WebhookDelayMinutes)
 	}
 }
 
-func (s *Server) callWebhook(ctx context.Context, url, consumerNS, sourceNS, varName string) {
+func (s *Server) callWebhook(ctx context.Context, url, consumerNS, sourceNS, varName string, delay int32) {
+	if delay > 0 {
+		s.clock.Sleep(time.Duration(delay) * time.Minute)
+	}
 	payload := struct {
 		ConsumerNamespace string `json:"consumer_namespace"`
 		SourceNamespace   string `json:"source_namespace"`
