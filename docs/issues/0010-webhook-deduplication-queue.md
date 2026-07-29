@@ -1,9 +1,9 @@
-# 02 — Webhook Deduplication Queue
+# 0010 — Webhook Deduplication Queue
 
 **What to build:**
 A database-backed deduplication queue for outgoing webhooks. Instead of immediately triggering downstream consumer webhooks for every variable write, the backend must queue pending webhooks and delay them using a sliding window quiet-time (`dedup_delay_minutes`) and a hard change cap (`max_dedup_changes`). When the delay expires or the cap is reached, the worker must trigger the consumer webhook with a new generated Trigger UUID, mapping all accumulated parent actuation UUIDs to it in the database.
 
-**Blocked by:** 01 — Actuation Lineage Tracking
+**Blocked by:** 0009 — Actuation Lineage Tracking
 
 **Status:** ready-for-agent
 
@@ -13,3 +13,6 @@ A database-backed deduplication queue for outgoing webhooks. Instead of immediat
 - [ ] A background worker loop polls for pending webhooks to fire, promotes them to "triggered" actuations in the database (recording accumulated parent lineages), and dispatches webhooks with the trigger UUID.
 - [ ] Existing server tests are updated to expect the simplified webhook payload.
 - [ ] Server test `TestWebhookDeduplicationAndMaxChanges` verifies sliding-window accumulation, early-fire limits, and correct parent lineage mapping in the database.
+- [ ] Expose `dedup_delay_minutes` and `max_dedup_changes` in the `varlet_namespace` resource schema in the Terraform provider.
+- [ ] Update `Create`, `Read`, and `Update` methods in `NamespaceResource` to send and retrieve these parameters to/from the gRPC backend.
+- [ ] Add a provider acceptance test (`TestAccNamespaceDeduplicationConfig`) verifying that configuring these parameters in Terraform correctly registers and persists them in the backend database.

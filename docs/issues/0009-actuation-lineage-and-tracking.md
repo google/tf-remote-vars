@@ -1,4 +1,4 @@
-# 01 — Actuation Lineage Tracking
+# 0009 — Actuation Lineage Tracking
 
 **What to build:**
 Enable tracking of Terraform actuation runs and their parent-child ancestry. Every actuation run must be assigned a unique UUID. The Terraform provider must read this UUID (and any upstream parent UUIDs) from the environment and send it to the Varlet backend. The backend must persist these actuations, record their parent-child lineage in the database, and link written variable versions to the active actuation UUID.
