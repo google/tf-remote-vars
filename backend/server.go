@@ -56,7 +56,6 @@ type Server struct {
 
 	mu             sync.Mutex
 	actuating      map[string]*activeActuation
-	affected       map[string]bool
 	succeeded      map[string]bool
 	debounceTimers map[string]*debounceState
 	stopChan       chan struct{}
@@ -68,7 +67,6 @@ func newServer(store Store, clock clockwork.Clock) *Server {
 		store:          store,
 		clock:          clock,
 		actuating:      make(map[string]*activeActuation),
-		affected:       make(map[string]bool),
 		succeeded:      make(map[string]bool),
 		debounceTimers: make(map[string]*debounceState),
 		stopChan:       make(chan struct{}),
@@ -953,7 +951,6 @@ func (s *Server) markActuating(ctx context.Context, ns string, uuid string) {
 		uuid:      uuid,
 		startTime: s.clock.Now(),
 	}
-	delete(s.affected, ns)
 	delete(s.succeeded, ns)
 	s.mu.Unlock()
 
@@ -1053,7 +1050,6 @@ func (s *Server) propagateAffected(ctx context.Context, sourceNS string, causalU
 
 	for _, d := range allDeps {
 		if d.Source == sourceNS {
-			s.affected[d.Consumer] = true
 			delete(s.succeeded, d.Consumer)
 
 			if err := s.store.RecordAffectedNamespace(ctx, d.Consumer, causalUUIDs); err != nil {
