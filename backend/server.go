@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/url"
 	"path"
 	"sync"
 	"time"
@@ -54,25 +55,28 @@ type Server struct {
 	store Store
 	clock clockwork.Clock
 
-	mu             sync.Mutex
-	actuating      map[string]*activeActuation
-	succeeded      map[string]bool
-	debounceTimers map[string]*debounceState
-	stopChan       chan struct{}
-	wg             sync.WaitGroup
+	mu                  sync.Mutex
+	actuating           map[string]*activeActuation
+	succeeded           map[string]bool
+	debounceTimers      map[string]*debounceState
+	stopChan            chan struct{}
+	wg                  sync.WaitGroup
+	maxActuationAgeDays int
 }
 
 func newServer(store Store, clock clockwork.Clock) *Server {
 	s := &Server{
-		store:          store,
-		clock:          clock,
-		actuating:      make(map[string]*activeActuation),
-		succeeded:      make(map[string]bool),
-		debounceTimers: make(map[string]*debounceState),
-		stopChan:       make(chan struct{}),
+		store:               store,
+		clock:               clock,
+		actuating:           make(map[string]*activeActuation),
+		succeeded:           make(map[string]bool),
+		debounceTimers:      make(map[string]*debounceState),
+		stopChan:            make(chan struct{}),
+		maxActuationAgeDays: 3, // default
 	}
-	s.wg.Add(1)
+	s.wg.Add(2)
 	go s.webhookWorker()
+	go s.completionHookWorker()
 	return s
 }
 
@@ -85,6 +89,14 @@ func NewServer(store Store) *Server {
 func NewServerWithClock(store Store, clock clockwork.Clock) *Server {
 	return newServer(store, clock)
 }
+
+// SetMaxActuationAgeDays configures the TTL for organic cascades.
+func (s *Server) SetMaxActuationAgeDays(days int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.maxActuationAgeDays = days
+}
+
 
 // Stop stops the background workers.
 func (s *Server) Stop() {
@@ -210,6 +222,47 @@ func (s *Server) GetActuationTrace(ctx context.Context, req *pb.GetActuationTrac
 		Edges: protoEdges,
 	}, nil
 }
+
+// RegisterCompletionHook registers a new webhook callback URL for completions.
+func (s *Server) RegisterCompletionHook(ctx context.Context, req *pb.RegisterCompletionHookRequest) (*pb.RegisterCompletionHookResponse, error) {
+	urlStr := req.GetUrl()
+	if urlStr == "" {
+		return nil, status.Error(codes.InvalidArgument, "url cannot be empty")
+	}
+
+	// Simple URL validation
+	if _, err := url.ParseRequestURI(urlStr); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid URL format: %v", err)
+	}
+
+	if err := s.store.RegisterCompletionHook(ctx, urlStr); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to register hook: %v", err)
+	}
+	return &pb.RegisterCompletionHookResponse{}, nil
+}
+
+// DeregisterCompletionHook removes a registered callback URL.
+func (s *Server) DeregisterCompletionHook(ctx context.Context, req *pb.DeregisterCompletionHookRequest) (*pb.DeregisterCompletionHookResponse, error) {
+	urlStr := req.GetUrl()
+	if urlStr == "" {
+		return nil, status.Error(codes.InvalidArgument, "url cannot be empty")
+	}
+
+	if err := s.store.DeregisterCompletionHook(ctx, urlStr); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to deregister hook: %v", err)
+	}
+	return &pb.DeregisterCompletionHookResponse{}, nil
+}
+
+// ListCompletionHooks returns all registered callback URLs.
+func (s *Server) ListCompletionHooks(ctx context.Context, req *pb.ListCompletionHooksRequest) (*pb.ListCompletionHooksResponse, error) {
+	urls, err := s.store.ListCompletionHooks(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to list hooks: %v", err)
+	}
+	return &pb.ListCompletionHooksResponse{Urls: urls}, nil
+}
+
 
 // GetNamespace retrieves a namespace.
 func (s *Server) GetNamespace(ctx context.Context, req *pb.GetNamespaceRequest) (*pb.GetNamespaceResponse, error) {
@@ -800,6 +853,7 @@ func (s *Server) processPendingWebhooks(ctx context.Context) {
 }
 
 func (s *Server) promoteTriggerToActuation(ctx context.Context, triggerUUID, namespace string, parents []string) {
+	log.Printf("[DEBUG] promoteTriggerToActuation: promote trigger %s for ns %s, parents: %v", triggerUUID, namespace, parents)
 	act := &Actuation{
 		UUID:      triggerUUID,
 		Namespace: namespace,
@@ -1120,16 +1174,24 @@ func (s *Server) handleTimeouts(ctx context.Context) {
 		}
 	}
 
+	var uuidsToComplete []string
 	if len(toSucceed) > 0 {
 		s.mu.Lock()
 		for _, ns := range toSucceed {
-			if _, ok := s.actuating[ns]; ok {
+			if act, ok := s.actuating[ns]; ok {
 				log.Printf("[INFO] Marking namespace %s as succeeded due to timeout", ns)
+				uuidsToComplete = append(uuidsToComplete, act.uuid)
 				delete(s.actuating, ns)
 				s.succeeded[ns] = true
 			}
 		}
 		s.mu.Unlock()
+	}
+
+	for _, u := range uuidsToComplete {
+		if err := s.store.UpdateActuationStatus(ctx, u, "completed"); err != nil {
+			log.Printf("[WARNING] failed to update database status for timed out actuation %s: %v", u, err)
+		}
 	}
 }
 
@@ -1197,4 +1259,137 @@ func (s *Server) calculateStatuses(ctx context.Context, namespaces []string) (ma
 	}
 	return statuses, nil
 }
+
+type CompletedActuation struct {
+	UUID   string `json:"uuid"`
+	Status string `json:"status"`
+}
+
+type CompletionWebhookPayload struct {
+	CompletedActuations []CompletedActuation `json:"completed_actuations"`
+}
+
+func (s *Server) completionHookWorker() {
+	defer s.wg.Done()
+	ticker := s.clock.NewTicker(5 * time.Second) // poll completions every 5 seconds
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.stopChan:
+			return
+		case <-ticker.Chan():
+			s.processCompletionHooks(context.Background())
+		}
+	}
+}
+
+func (s *Server) processCompletionHooks(ctx context.Context) {
+	roots, err := s.store.GetUnnotifiedRootActuations(ctx)
+	if err != nil {
+		log.Printf("[ERROR] failed to get unnotified root actuations: %v", err)
+		return
+	}
+
+	if len(roots) == 0 {
+		return
+	}
+
+	hookURLs, err := s.store.ListCompletionHooks(ctx)
+	if err != nil {
+		log.Printf("[ERROR] failed to list completion hooks: %v", err)
+		return
+	}
+	if len(hookURLs) == 0 {
+		// No hooks registered, but we still need to transition stale root runs to 'stale' status in the DB
+		// so they don't stay 'active' forever.
+		s.transitionStaleRootActuations(ctx, roots)
+		return
+	}
+
+	now := s.clock.Now()
+	s.mu.Lock()
+	maxAge := time.Duration(s.maxActuationAgeDays) * 24 * time.Hour
+	s.mu.Unlock()
+
+	var completed []CompletedActuation
+
+	for _, r := range roots {
+		age := now.Sub(r.CreatedAt)
+		if age > maxAge {
+			completed = append(completed, CompletedActuation{UUID: r.UUID, Status: "stale"})
+		} else {
+			isComplete, err := s.store.IsCascadeComplete(ctx, r.UUID)
+			if err != nil {
+				log.Printf("[WARNING] failed to check cascade completion for %s: %v", r.UUID, err)
+				continue
+			}
+			if isComplete {
+				completed = append(completed, CompletedActuation{UUID: r.UUID, Status: "completed"})
+			}
+		}
+	}
+
+	if len(completed) == 0 {
+		return
+	}
+
+	payload := CompletionWebhookPayload{CompletedActuations: completed}
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("[ERROR] failed to marshal completion hook payload: %v", err)
+		return
+	}
+
+	success := true
+	for _, hookURL := range hookURLs {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, hookURL, bytes.NewBuffer(payloadBytes))
+		if err != nil {
+			log.Printf("[WARNING] failed to create HTTP request for hook %s: %v", hookURL, err)
+			success = false
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := webhookClient.Do(req)
+		if err != nil {
+			log.Printf("[WARNING] failed to dispatch completion hook to %s: %v", hookURL, err)
+			success = false
+			continue
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			log.Printf("[WARNING] completion hook to %s returned status %d", hookURL, resp.StatusCode)
+			success = false
+		}
+	}
+
+	if success {
+		// Mark all notified root runs as notified in DB
+		for _, item := range completed {
+			if err := s.store.SetActuationNotified(ctx, item.UUID, item.Status); err != nil {
+				log.Printf("[ERROR] failed to mark actuation %s as notified: %v", item.UUID, err)
+			}
+		}
+	}
+}
+
+func (s *Server) transitionStaleRootActuations(ctx context.Context, roots []*Actuation) {
+	now := s.clock.Now()
+	s.mu.Lock()
+	maxAge := time.Duration(s.maxActuationAgeDays) * 24 * time.Hour
+	s.mu.Unlock()
+
+	for _, r := range roots {
+		age := now.Sub(r.CreatedAt)
+		if age > maxAge {
+			log.Printf("[INFO] Transitioning stale unnotified root actuation %s to 'stale' status", r.UUID)
+			if err := s.store.SetActuationNotified(ctx, r.UUID, "stale"); err != nil {
+				log.Printf("[ERROR] failed to update stale actuation status: %v", r.UUID)
+			}
+		}
+	}
+}
+
 

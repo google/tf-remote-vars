@@ -1530,6 +1530,246 @@ func (*StartActuationResponse) Descriptor() ([]byte, []int) {
 	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{26}
 }
 
+type RegisterCompletionHookRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Url           string                 `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterCompletionHookRequest) Reset() {
+	*x = RegisterCompletionHookRequest{}
+	mi := &file_proto_v1_varlet_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterCompletionHookRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterCompletionHookRequest) ProtoMessage() {}
+
+func (x *RegisterCompletionHookRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_varlet_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterCompletionHookRequest.ProtoReflect.Descriptor instead.
+func (*RegisterCompletionHookRequest) Descriptor() ([]byte, []int) {
+	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *RegisterCompletionHookRequest) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+type RegisterCompletionHookResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterCompletionHookResponse) Reset() {
+	*x = RegisterCompletionHookResponse{}
+	mi := &file_proto_v1_varlet_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterCompletionHookResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterCompletionHookResponse) ProtoMessage() {}
+
+func (x *RegisterCompletionHookResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_varlet_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterCompletionHookResponse.ProtoReflect.Descriptor instead.
+func (*RegisterCompletionHookResponse) Descriptor() ([]byte, []int) {
+	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{28}
+}
+
+type DeregisterCompletionHookRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Url           string                 `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeregisterCompletionHookRequest) Reset() {
+	*x = DeregisterCompletionHookRequest{}
+	mi := &file_proto_v1_varlet_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeregisterCompletionHookRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeregisterCompletionHookRequest) ProtoMessage() {}
+
+func (x *DeregisterCompletionHookRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_varlet_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeregisterCompletionHookRequest.ProtoReflect.Descriptor instead.
+func (*DeregisterCompletionHookRequest) Descriptor() ([]byte, []int) {
+	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *DeregisterCompletionHookRequest) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+type DeregisterCompletionHookResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeregisterCompletionHookResponse) Reset() {
+	*x = DeregisterCompletionHookResponse{}
+	mi := &file_proto_v1_varlet_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeregisterCompletionHookResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeregisterCompletionHookResponse) ProtoMessage() {}
+
+func (x *DeregisterCompletionHookResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_varlet_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeregisterCompletionHookResponse.ProtoReflect.Descriptor instead.
+func (*DeregisterCompletionHookResponse) Descriptor() ([]byte, []int) {
+	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{30}
+}
+
+type ListCompletionHooksRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListCompletionHooksRequest) Reset() {
+	*x = ListCompletionHooksRequest{}
+	mi := &file_proto_v1_varlet_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListCompletionHooksRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListCompletionHooksRequest) ProtoMessage() {}
+
+func (x *ListCompletionHooksRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_varlet_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListCompletionHooksRequest.ProtoReflect.Descriptor instead.
+func (*ListCompletionHooksRequest) Descriptor() ([]byte, []int) {
+	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{31}
+}
+
+type ListCompletionHooksResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Urls          []string               `protobuf:"bytes,1,rep,name=urls,proto3" json:"urls,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListCompletionHooksResponse) Reset() {
+	*x = ListCompletionHooksResponse{}
+	mi := &file_proto_v1_varlet_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListCompletionHooksResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListCompletionHooksResponse) ProtoMessage() {}
+
+func (x *ListCompletionHooksResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_varlet_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListCompletionHooksResponse.ProtoReflect.Descriptor instead.
+func (*ListCompletionHooksResponse) Descriptor() ([]byte, []int) {
+	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *ListCompletionHooksResponse) GetUrls() []string {
+	if x != nil {
+		return x.Urls
+	}
+	return nil
+}
+
 var File_proto_v1_varlet_proto protoreflect.FileDescriptor
 
 const file_proto_v1_varlet_proto_rawDesc = "" +
@@ -1636,7 +1876,17 @@ const file_proto_v1_varlet_proto_rawDesc = "" +
 	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12%\n" +
 	"\x0eactuation_uuid\x18\x02 \x01(\tR\ractuationUuid\x124\n" +
 	"\x16parent_actuation_uuids\x18\x03 \x03(\tR\x14parentActuationUuids\"\x18\n" +
-	"\x16StartActuationResponse2\xff\a\n" +
+	"\x16StartActuationResponse\"1\n" +
+	"\x1dRegisterCompletionHookRequest\x12\x10\n" +
+	"\x03url\x18\x01 \x01(\tR\x03url\" \n" +
+	"\x1eRegisterCompletionHookResponse\"3\n" +
+	"\x1fDeregisterCompletionHookRequest\x12\x10\n" +
+	"\x03url\x18\x01 \x01(\tR\x03url\"\"\n" +
+	" DeregisterCompletionHookResponse\"\x1c\n" +
+	"\x1aListCompletionHooksRequest\"1\n" +
+	"\x1bListCompletionHooksResponse\x12\x12\n" +
+	"\x04urls\x18\x01 \x03(\tR\x04urls2\xc9\n" +
+	"\n" +
 	"\rVarletService\x12^\n" +
 	"\x11RegisterNamespace\x12#.varlet.v1.RegisterNamespaceRequest\x1a$.varlet.v1.RegisterNamespaceResponse\x12O\n" +
 	"\fGetNamespace\x12\x1e.varlet.v1.GetNamespaceRequest\x1a\x1f.varlet.v1.GetNamespaceResponse\x12a\n" +
@@ -1648,7 +1898,10 @@ const file_proto_v1_varlet_proto_rawDesc = "" +
 	"\x10GetVariableValue\x12\".varlet.v1.GetVariableValueRequest\x1a#.varlet.v1.GetVariableValueResponse\x12U\n" +
 	"\x0eStartActuation\x12 .varlet.v1.StartActuationRequest\x1a!.varlet.v1.StartActuationResponse\x12a\n" +
 	"\x12GetDependencyGraph\x12$.varlet.v1.GetDependencyGraphRequest\x1a%.varlet.v1.GetDependencyGraphResponse\x12^\n" +
-	"\x11GetActuationTrace\x12#.varlet.v1.GetActuationTraceRequest\x1a$.varlet.v1.GetActuationTraceResponseB,Z*github.com/google/varlet/proto/v1;varletv1b\x06proto3"
+	"\x11GetActuationTrace\x12#.varlet.v1.GetActuationTraceRequest\x1a$.varlet.v1.GetActuationTraceResponse\x12m\n" +
+	"\x16RegisterCompletionHook\x12(.varlet.v1.RegisterCompletionHookRequest\x1a).varlet.v1.RegisterCompletionHookResponse\x12s\n" +
+	"\x18DeregisterCompletionHook\x12*.varlet.v1.DeregisterCompletionHookRequest\x1a+.varlet.v1.DeregisterCompletionHookResponse\x12d\n" +
+	"\x13ListCompletionHooks\x12%.varlet.v1.ListCompletionHooksRequest\x1a&.varlet.v1.ListCompletionHooksResponseB,Z*github.com/google/varlet/proto/v1;varletv1b\x06proto3"
 
 var (
 	file_proto_v1_varlet_proto_rawDescOnce sync.Once
@@ -1662,46 +1915,52 @@ func file_proto_v1_varlet_proto_rawDescGZIP() []byte {
 	return file_proto_v1_varlet_proto_rawDescData
 }
 
-var file_proto_v1_varlet_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_proto_v1_varlet_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
 var file_proto_v1_varlet_proto_goTypes = []any{
-	(*RetentionPolicy)(nil),            // 0: varlet.v1.RetentionPolicy
-	(*RegisterNamespaceRequest)(nil),   // 1: varlet.v1.RegisterNamespaceRequest
-	(*RegisterNamespaceResponse)(nil),  // 2: varlet.v1.RegisterNamespaceResponse
-	(*GetNamespaceRequest)(nil),        // 3: varlet.v1.GetNamespaceRequest
-	(*GetNamespaceResponse)(nil),       // 4: varlet.v1.GetNamespaceResponse
-	(*PutVariableRequest)(nil),         // 5: varlet.v1.PutVariableRequest
-	(*PutVariableResponse)(nil),        // 6: varlet.v1.PutVariableResponse
-	(*DeleteVariableRequest)(nil),      // 7: varlet.v1.DeleteVariableRequest
-	(*DeleteVariableResponse)(nil),     // 8: varlet.v1.DeleteVariableResponse
-	(*RegisterConsumerRequest)(nil),    // 9: varlet.v1.RegisterConsumerRequest
-	(*RegisterConsumerResponse)(nil),   // 10: varlet.v1.RegisterConsumerResponse
-	(*DeregisterConsumerRequest)(nil),  // 11: varlet.v1.DeregisterConsumerRequest
-	(*DeregisterConsumerResponse)(nil), // 12: varlet.v1.DeregisterConsumerResponse
-	(*GetVariableValueRequest)(nil),    // 13: varlet.v1.GetVariableValueRequest
-	(*GetVariableValueResponse)(nil),   // 14: varlet.v1.GetVariableValueResponse
-	(*SetNamespacePolicyRequest)(nil),  // 15: varlet.v1.SetNamespacePolicyRequest
-	(*SetNamespacePolicyResponse)(nil), // 16: varlet.v1.SetNamespacePolicyResponse
-	(*GetDependencyGraphRequest)(nil),  // 17: varlet.v1.GetDependencyGraphRequest
-	(*DependencyEdge)(nil),             // 18: varlet.v1.DependencyEdge
-	(*GetDependencyGraphResponse)(nil), // 19: varlet.v1.GetDependencyGraphResponse
-	(*NamespaceStatusInfo)(nil),        // 20: varlet.v1.NamespaceStatusInfo
-	(*TraceNode)(nil),                  // 21: varlet.v1.TraceNode
-	(*TraceEdge)(nil),                  // 22: varlet.v1.TraceEdge
-	(*GetActuationTraceRequest)(nil),   // 23: varlet.v1.GetActuationTraceRequest
-	(*GetActuationTraceResponse)(nil),  // 24: varlet.v1.GetActuationTraceResponse
-	(*StartActuationRequest)(nil),      // 25: varlet.v1.StartActuationRequest
-	(*StartActuationResponse)(nil),     // 26: varlet.v1.StartActuationResponse
-	nil,                                // 27: varlet.v1.GetDependencyGraphResponse.StatusesEntry
-	(*structpb.Value)(nil),             // 28: google.protobuf.Value
+	(*RetentionPolicy)(nil),                  // 0: varlet.v1.RetentionPolicy
+	(*RegisterNamespaceRequest)(nil),         // 1: varlet.v1.RegisterNamespaceRequest
+	(*RegisterNamespaceResponse)(nil),        // 2: varlet.v1.RegisterNamespaceResponse
+	(*GetNamespaceRequest)(nil),              // 3: varlet.v1.GetNamespaceRequest
+	(*GetNamespaceResponse)(nil),             // 4: varlet.v1.GetNamespaceResponse
+	(*PutVariableRequest)(nil),               // 5: varlet.v1.PutVariableRequest
+	(*PutVariableResponse)(nil),              // 6: varlet.v1.PutVariableResponse
+	(*DeleteVariableRequest)(nil),            // 7: varlet.v1.DeleteVariableRequest
+	(*DeleteVariableResponse)(nil),           // 8: varlet.v1.DeleteVariableResponse
+	(*RegisterConsumerRequest)(nil),          // 9: varlet.v1.RegisterConsumerRequest
+	(*RegisterConsumerResponse)(nil),         // 10: varlet.v1.RegisterConsumerResponse
+	(*DeregisterConsumerRequest)(nil),        // 11: varlet.v1.DeregisterConsumerRequest
+	(*DeregisterConsumerResponse)(nil),       // 12: varlet.v1.DeregisterConsumerResponse
+	(*GetVariableValueRequest)(nil),          // 13: varlet.v1.GetVariableValueRequest
+	(*GetVariableValueResponse)(nil),         // 14: varlet.v1.GetVariableValueResponse
+	(*SetNamespacePolicyRequest)(nil),        // 15: varlet.v1.SetNamespacePolicyRequest
+	(*SetNamespacePolicyResponse)(nil),       // 16: varlet.v1.SetNamespacePolicyResponse
+	(*GetDependencyGraphRequest)(nil),        // 17: varlet.v1.GetDependencyGraphRequest
+	(*DependencyEdge)(nil),                   // 18: varlet.v1.DependencyEdge
+	(*GetDependencyGraphResponse)(nil),       // 19: varlet.v1.GetDependencyGraphResponse
+	(*NamespaceStatusInfo)(nil),              // 20: varlet.v1.NamespaceStatusInfo
+	(*TraceNode)(nil),                        // 21: varlet.v1.TraceNode
+	(*TraceEdge)(nil),                        // 22: varlet.v1.TraceEdge
+	(*GetActuationTraceRequest)(nil),         // 23: varlet.v1.GetActuationTraceRequest
+	(*GetActuationTraceResponse)(nil),        // 24: varlet.v1.GetActuationTraceResponse
+	(*StartActuationRequest)(nil),            // 25: varlet.v1.StartActuationRequest
+	(*StartActuationResponse)(nil),           // 26: varlet.v1.StartActuationResponse
+	(*RegisterCompletionHookRequest)(nil),    // 27: varlet.v1.RegisterCompletionHookRequest
+	(*RegisterCompletionHookResponse)(nil),   // 28: varlet.v1.RegisterCompletionHookResponse
+	(*DeregisterCompletionHookRequest)(nil),  // 29: varlet.v1.DeregisterCompletionHookRequest
+	(*DeregisterCompletionHookResponse)(nil), // 30: varlet.v1.DeregisterCompletionHookResponse
+	(*ListCompletionHooksRequest)(nil),       // 31: varlet.v1.ListCompletionHooksRequest
+	(*ListCompletionHooksResponse)(nil),      // 32: varlet.v1.ListCompletionHooksResponse
+	nil,                                      // 33: varlet.v1.GetDependencyGraphResponse.StatusesEntry
+	(*structpb.Value)(nil),                   // 34: google.protobuf.Value
 }
 var file_proto_v1_varlet_proto_depIdxs = []int32{
 	0,  // 0: varlet.v1.RegisterNamespaceRequest.retention_policy:type_name -> varlet.v1.RetentionPolicy
 	0,  // 1: varlet.v1.GetNamespaceResponse.retention_policy:type_name -> varlet.v1.RetentionPolicy
-	28, // 2: varlet.v1.PutVariableRequest.value:type_name -> google.protobuf.Value
-	28, // 3: varlet.v1.RegisterConsumerResponse.value:type_name -> google.protobuf.Value
-	28, // 4: varlet.v1.GetVariableValueResponse.value:type_name -> google.protobuf.Value
+	34, // 2: varlet.v1.PutVariableRequest.value:type_name -> google.protobuf.Value
+	34, // 3: varlet.v1.RegisterConsumerResponse.value:type_name -> google.protobuf.Value
+	34, // 4: varlet.v1.GetVariableValueResponse.value:type_name -> google.protobuf.Value
 	18, // 5: varlet.v1.GetDependencyGraphResponse.edges:type_name -> varlet.v1.DependencyEdge
-	27, // 6: varlet.v1.GetDependencyGraphResponse.statuses:type_name -> varlet.v1.GetDependencyGraphResponse.StatusesEntry
+	33, // 6: varlet.v1.GetDependencyGraphResponse.statuses:type_name -> varlet.v1.GetDependencyGraphResponse.StatusesEntry
 	21, // 7: varlet.v1.GetActuationTraceResponse.nodes:type_name -> varlet.v1.TraceNode
 	22, // 8: varlet.v1.GetActuationTraceResponse.edges:type_name -> varlet.v1.TraceEdge
 	20, // 9: varlet.v1.GetDependencyGraphResponse.StatusesEntry.value:type_name -> varlet.v1.NamespaceStatusInfo
@@ -1716,19 +1975,25 @@ var file_proto_v1_varlet_proto_depIdxs = []int32{
 	25, // 18: varlet.v1.VarletService.StartActuation:input_type -> varlet.v1.StartActuationRequest
 	17, // 19: varlet.v1.VarletService.GetDependencyGraph:input_type -> varlet.v1.GetDependencyGraphRequest
 	23, // 20: varlet.v1.VarletService.GetActuationTrace:input_type -> varlet.v1.GetActuationTraceRequest
-	2,  // 21: varlet.v1.VarletService.RegisterNamespace:output_type -> varlet.v1.RegisterNamespaceResponse
-	4,  // 22: varlet.v1.VarletService.GetNamespace:output_type -> varlet.v1.GetNamespaceResponse
-	16, // 23: varlet.v1.VarletService.SetNamespacePolicy:output_type -> varlet.v1.SetNamespacePolicyResponse
-	6,  // 24: varlet.v1.VarletService.PutVariable:output_type -> varlet.v1.PutVariableResponse
-	8,  // 25: varlet.v1.VarletService.DeleteVariable:output_type -> varlet.v1.DeleteVariableResponse
-	10, // 26: varlet.v1.VarletService.RegisterConsumer:output_type -> varlet.v1.RegisterConsumerResponse
-	12, // 27: varlet.v1.VarletService.DeregisterConsumer:output_type -> varlet.v1.DeregisterConsumerResponse
-	14, // 28: varlet.v1.VarletService.GetVariableValue:output_type -> varlet.v1.GetVariableValueResponse
-	26, // 29: varlet.v1.VarletService.StartActuation:output_type -> varlet.v1.StartActuationResponse
-	19, // 30: varlet.v1.VarletService.GetDependencyGraph:output_type -> varlet.v1.GetDependencyGraphResponse
-	24, // 31: varlet.v1.VarletService.GetActuationTrace:output_type -> varlet.v1.GetActuationTraceResponse
-	21, // [21:32] is the sub-list for method output_type
-	10, // [10:21] is the sub-list for method input_type
+	27, // 21: varlet.v1.VarletService.RegisterCompletionHook:input_type -> varlet.v1.RegisterCompletionHookRequest
+	29, // 22: varlet.v1.VarletService.DeregisterCompletionHook:input_type -> varlet.v1.DeregisterCompletionHookRequest
+	31, // 23: varlet.v1.VarletService.ListCompletionHooks:input_type -> varlet.v1.ListCompletionHooksRequest
+	2,  // 24: varlet.v1.VarletService.RegisterNamespace:output_type -> varlet.v1.RegisterNamespaceResponse
+	4,  // 25: varlet.v1.VarletService.GetNamespace:output_type -> varlet.v1.GetNamespaceResponse
+	16, // 26: varlet.v1.VarletService.SetNamespacePolicy:output_type -> varlet.v1.SetNamespacePolicyResponse
+	6,  // 27: varlet.v1.VarletService.PutVariable:output_type -> varlet.v1.PutVariableResponse
+	8,  // 28: varlet.v1.VarletService.DeleteVariable:output_type -> varlet.v1.DeleteVariableResponse
+	10, // 29: varlet.v1.VarletService.RegisterConsumer:output_type -> varlet.v1.RegisterConsumerResponse
+	12, // 30: varlet.v1.VarletService.DeregisterConsumer:output_type -> varlet.v1.DeregisterConsumerResponse
+	14, // 31: varlet.v1.VarletService.GetVariableValue:output_type -> varlet.v1.GetVariableValueResponse
+	26, // 32: varlet.v1.VarletService.StartActuation:output_type -> varlet.v1.StartActuationResponse
+	19, // 33: varlet.v1.VarletService.GetDependencyGraph:output_type -> varlet.v1.GetDependencyGraphResponse
+	24, // 34: varlet.v1.VarletService.GetActuationTrace:output_type -> varlet.v1.GetActuationTraceResponse
+	28, // 35: varlet.v1.VarletService.RegisterCompletionHook:output_type -> varlet.v1.RegisterCompletionHookResponse
+	30, // 36: varlet.v1.VarletService.DeregisterCompletionHook:output_type -> varlet.v1.DeregisterCompletionHookResponse
+	32, // 37: varlet.v1.VarletService.ListCompletionHooks:output_type -> varlet.v1.ListCompletionHooksResponse
+	24, // [24:38] is the sub-list for method output_type
+	10, // [10:24] is the sub-list for method input_type
 	10, // [10:10] is the sub-list for extension type_name
 	10, // [10:10] is the sub-list for extension extendee
 	0,  // [0:10] is the sub-list for field type_name
@@ -1745,7 +2010,7 @@ func file_proto_v1_varlet_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_v1_varlet_proto_rawDesc), len(file_proto_v1_varlet_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   28,
+			NumMessages:   34,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

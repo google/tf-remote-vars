@@ -19,17 +19,20 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	VarletService_RegisterNamespace_FullMethodName  = "/varlet.v1.VarletService/RegisterNamespace"
-	VarletService_GetNamespace_FullMethodName       = "/varlet.v1.VarletService/GetNamespace"
-	VarletService_SetNamespacePolicy_FullMethodName = "/varlet.v1.VarletService/SetNamespacePolicy"
-	VarletService_PutVariable_FullMethodName        = "/varlet.v1.VarletService/PutVariable"
-	VarletService_DeleteVariable_FullMethodName     = "/varlet.v1.VarletService/DeleteVariable"
-	VarletService_RegisterConsumer_FullMethodName   = "/varlet.v1.VarletService/RegisterConsumer"
-	VarletService_DeregisterConsumer_FullMethodName = "/varlet.v1.VarletService/DeregisterConsumer"
-	VarletService_GetVariableValue_FullMethodName   = "/varlet.v1.VarletService/GetVariableValue"
-	VarletService_StartActuation_FullMethodName     = "/varlet.v1.VarletService/StartActuation"
-	VarletService_GetDependencyGraph_FullMethodName = "/varlet.v1.VarletService/GetDependencyGraph"
-	VarletService_GetActuationTrace_FullMethodName  = "/varlet.v1.VarletService/GetActuationTrace"
+	VarletService_RegisterNamespace_FullMethodName        = "/varlet.v1.VarletService/RegisterNamespace"
+	VarletService_GetNamespace_FullMethodName             = "/varlet.v1.VarletService/GetNamespace"
+	VarletService_SetNamespacePolicy_FullMethodName       = "/varlet.v1.VarletService/SetNamespacePolicy"
+	VarletService_PutVariable_FullMethodName              = "/varlet.v1.VarletService/PutVariable"
+	VarletService_DeleteVariable_FullMethodName           = "/varlet.v1.VarletService/DeleteVariable"
+	VarletService_RegisterConsumer_FullMethodName         = "/varlet.v1.VarletService/RegisterConsumer"
+	VarletService_DeregisterConsumer_FullMethodName       = "/varlet.v1.VarletService/DeregisterConsumer"
+	VarletService_GetVariableValue_FullMethodName         = "/varlet.v1.VarletService/GetVariableValue"
+	VarletService_StartActuation_FullMethodName           = "/varlet.v1.VarletService/StartActuation"
+	VarletService_GetDependencyGraph_FullMethodName       = "/varlet.v1.VarletService/GetDependencyGraph"
+	VarletService_GetActuationTrace_FullMethodName        = "/varlet.v1.VarletService/GetActuationTrace"
+	VarletService_RegisterCompletionHook_FullMethodName   = "/varlet.v1.VarletService/RegisterCompletionHook"
+	VarletService_DeregisterCompletionHook_FullMethodName = "/varlet.v1.VarletService/DeregisterCompletionHook"
+	VarletService_ListCompletionHooks_FullMethodName      = "/varlet.v1.VarletService/ListCompletionHooks"
 )
 
 // VarletServiceClient is the client API for VarletService service.
@@ -53,6 +56,10 @@ type VarletServiceClient interface {
 	// Graph operations
 	GetDependencyGraph(ctx context.Context, in *GetDependencyGraphRequest, opts ...grpc.CallOption) (*GetDependencyGraphResponse, error)
 	GetActuationTrace(ctx context.Context, in *GetActuationTraceRequest, opts ...grpc.CallOption) (*GetActuationTraceResponse, error)
+	// Completion Hooks
+	RegisterCompletionHook(ctx context.Context, in *RegisterCompletionHookRequest, opts ...grpc.CallOption) (*RegisterCompletionHookResponse, error)
+	DeregisterCompletionHook(ctx context.Context, in *DeregisterCompletionHookRequest, opts ...grpc.CallOption) (*DeregisterCompletionHookResponse, error)
+	ListCompletionHooks(ctx context.Context, in *ListCompletionHooksRequest, opts ...grpc.CallOption) (*ListCompletionHooksResponse, error)
 }
 
 type varletServiceClient struct {
@@ -173,6 +180,36 @@ func (c *varletServiceClient) GetActuationTrace(ctx context.Context, in *GetActu
 	return out, nil
 }
 
+func (c *varletServiceClient) RegisterCompletionHook(ctx context.Context, in *RegisterCompletionHookRequest, opts ...grpc.CallOption) (*RegisterCompletionHookResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterCompletionHookResponse)
+	err := c.cc.Invoke(ctx, VarletService_RegisterCompletionHook_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *varletServiceClient) DeregisterCompletionHook(ctx context.Context, in *DeregisterCompletionHookRequest, opts ...grpc.CallOption) (*DeregisterCompletionHookResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeregisterCompletionHookResponse)
+	err := c.cc.Invoke(ctx, VarletService_DeregisterCompletionHook_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *varletServiceClient) ListCompletionHooks(ctx context.Context, in *ListCompletionHooksRequest, opts ...grpc.CallOption) (*ListCompletionHooksResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListCompletionHooksResponse)
+	err := c.cc.Invoke(ctx, VarletService_ListCompletionHooks_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // VarletServiceServer is the server API for VarletService service.
 // All implementations must embed UnimplementedVarletServiceServer
 // for forward compatibility.
@@ -194,6 +231,10 @@ type VarletServiceServer interface {
 	// Graph operations
 	GetDependencyGraph(context.Context, *GetDependencyGraphRequest) (*GetDependencyGraphResponse, error)
 	GetActuationTrace(context.Context, *GetActuationTraceRequest) (*GetActuationTraceResponse, error)
+	// Completion Hooks
+	RegisterCompletionHook(context.Context, *RegisterCompletionHookRequest) (*RegisterCompletionHookResponse, error)
+	DeregisterCompletionHook(context.Context, *DeregisterCompletionHookRequest) (*DeregisterCompletionHookResponse, error)
+	ListCompletionHooks(context.Context, *ListCompletionHooksRequest) (*ListCompletionHooksResponse, error)
 	mustEmbedUnimplementedVarletServiceServer()
 }
 
@@ -236,6 +277,15 @@ func (UnimplementedVarletServiceServer) GetDependencyGraph(context.Context, *Get
 }
 func (UnimplementedVarletServiceServer) GetActuationTrace(context.Context, *GetActuationTraceRequest) (*GetActuationTraceResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetActuationTrace not implemented")
+}
+func (UnimplementedVarletServiceServer) RegisterCompletionHook(context.Context, *RegisterCompletionHookRequest) (*RegisterCompletionHookResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RegisterCompletionHook not implemented")
+}
+func (UnimplementedVarletServiceServer) DeregisterCompletionHook(context.Context, *DeregisterCompletionHookRequest) (*DeregisterCompletionHookResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeregisterCompletionHook not implemented")
+}
+func (UnimplementedVarletServiceServer) ListCompletionHooks(context.Context, *ListCompletionHooksRequest) (*ListCompletionHooksResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListCompletionHooks not implemented")
 }
 func (UnimplementedVarletServiceServer) mustEmbedUnimplementedVarletServiceServer() {}
 func (UnimplementedVarletServiceServer) testEmbeddedByValue()                       {}
@@ -456,6 +506,60 @@ func _VarletService_GetActuationTrace_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _VarletService_RegisterCompletionHook_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterCompletionHookRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VarletServiceServer).RegisterCompletionHook(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VarletService_RegisterCompletionHook_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VarletServiceServer).RegisterCompletionHook(ctx, req.(*RegisterCompletionHookRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _VarletService_DeregisterCompletionHook_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeregisterCompletionHookRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VarletServiceServer).DeregisterCompletionHook(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VarletService_DeregisterCompletionHook_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VarletServiceServer).DeregisterCompletionHook(ctx, req.(*DeregisterCompletionHookRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _VarletService_ListCompletionHooks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListCompletionHooksRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VarletServiceServer).ListCompletionHooks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VarletService_ListCompletionHooks_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VarletServiceServer).ListCompletionHooks(ctx, req.(*ListCompletionHooksRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // VarletService_ServiceDesc is the grpc.ServiceDesc for VarletService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -506,6 +610,18 @@ var VarletService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetActuationTrace",
 			Handler:    _VarletService_GetActuationTrace_Handler,
+		},
+		{
+			MethodName: "RegisterCompletionHook",
+			Handler:    _VarletService_RegisterCompletionHook_Handler,
+		},
+		{
+			MethodName: "DeregisterCompletionHook",
+			Handler:    _VarletService_DeregisterCompletionHook_Handler,
+		},
+		{
+			MethodName: "ListCompletionHooks",
+			Handler:    _VarletService_ListCompletionHooks_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

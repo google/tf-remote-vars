@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -2145,6 +2146,359 @@ func TestWebhookDeduplicationAndMaxChanges(t *testing.T) {
 		}
 	}
 }
+
+func TestCompletionHookRegistry(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	server := NewServer(store)
+	t.Cleanup(server.Stop)
+
+	// List hooks initially empty
+	listResp, err := server.ListCompletionHooks(ctx, &pb.ListCompletionHooksRequest{})
+	if err != nil {
+		t.Fatalf("ListCompletionHooks failed: %v", err)
+	}
+	if len(listResp.GetUrls()) != 0 {
+		t.Errorf("expected 0 hooks, got %v", listResp.GetUrls())
+	}
+
+	// Register valid hook
+	_, err = server.RegisterCompletionHook(ctx, &pb.RegisterCompletionHookRequest{
+		Url: "http://example.com/hook",
+	})
+	if err != nil {
+		t.Fatalf("RegisterCompletionHook failed: %v", err)
+	}
+
+	// Register another valid hook
+	_, err = server.RegisterCompletionHook(ctx, &pb.RegisterCompletionHookRequest{
+		Url: "https://foo.bar/callback",
+	})
+	if err != nil {
+		t.Fatalf("RegisterCompletionHook failed: %v", err)
+	}
+
+	// List and check
+	listResp, err = server.ListCompletionHooks(ctx, &pb.ListCompletionHooksRequest{})
+	if err != nil {
+		t.Fatalf("ListCompletionHooks failed: %v", err)
+	}
+	expected := []string{"http://example.com/hook", "https://foo.bar/callback"}
+	if len(listResp.GetUrls()) != 2 {
+		t.Fatalf("expected 2 hooks, got %v", listResp.GetUrls())
+	}
+	for i, u := range listResp.GetUrls() {
+		if u != expected[i] {
+			t.Errorf("expected url %s, got %s", expected[i], u)
+		}
+	}
+
+	// Try registering invalid URL
+	_, err = server.RegisterCompletionHook(ctx, &pb.RegisterCompletionHookRequest{
+		Url: "invalid-url",
+	})
+	if err == nil {
+		t.Errorf("expected error registering invalid URL, got nil")
+	} else {
+		st, ok := status.FromError(err)
+		if !ok || st.Code() != codes.InvalidArgument {
+			t.Errorf("expected InvalidArgument error, got: %v", err)
+		}
+	}
+
+	// Deregister hook
+	_, err = server.DeregisterCompletionHook(ctx, &pb.DeregisterCompletionHookRequest{
+		Url: "http://example.com/hook",
+	})
+	if err != nil {
+		t.Fatalf("DeregisterCompletionHook failed: %v", err)
+	}
+
+	// Verify it was removed
+	listResp, err = server.ListCompletionHooks(ctx, &pb.ListCompletionHooksRequest{})
+	if err != nil {
+		t.Fatalf("ListCompletionHooks failed: %v", err)
+	}
+	if len(listResp.GetUrls()) != 1 || listResp.GetUrls()[0] != "https://foo.bar/callback" {
+		t.Errorf("expected only 'https://foo.bar/callback', got %v", listResp.GetUrls())
+	}
+}
+
+func TestCompletionHookCascadeNotification(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	fakeClock := clockwork.NewFakeClock()
+	server := NewServerWithClock(store, fakeClock)
+	t.Cleanup(server.Stop)
+
+	// Set short max age for stale test (1 day)
+	server.SetMaxActuationAgeDays(1)
+
+	// Setup a mock callback HTTP server
+	type hookEvent struct {
+		UUID   string
+		Status string
+	}
+	received := make(chan []hookEvent, 10)
+
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Completed []struct {
+				UUID   string `json:"uuid"`
+				Status string `json:"status"`
+			} `json:"completed_actuations"`
+		}
+		log.Printf("[DEBUG] mock completion hook server received request: %s %s", r.Method, r.URL.Path)
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			log.Printf("[DEBUG] mock completion hook server decode failed: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var events []hookEvent
+		for _, c := range payload.Completed {
+			events = append(events, hookEvent{UUID: c.UUID, Status: c.Status})
+		}
+		received <- events
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer testServer.Close()
+
+
+
+	// Register namespaces
+	if err := store.RegisterNamespace(ctx, &Namespace{Name: "root-ns"}); err != nil {
+		t.Fatalf("failed to register root-ns: %v", err)
+	}
+	if err := store.RegisterNamespace(ctx, &Namespace{
+		Name:          "consumer-ns",
+		RunWebhookURL: "",
+	}); err != nil {
+		t.Fatalf("failed to register consumer-ns: %v", err)
+	}
+
+	// Setup policies
+	if err := store.SetNamespacePolicy(ctx, "root-ns", []string{"consumer-ns"}); err != nil {
+		t.Fatalf("failed to set policy on root-ns: %v", err)
+	}
+
+	// Register consumers
+	valInit, _ := structpb.NewValue("init")
+	_, err := server.PutVariable(ctx, &pb.PutVariableRequest{
+		Namespace: "root-ns",
+		Name:      "var1",
+		Value:     valInit,
+	})
+	if err != nil {
+		t.Fatalf("failed to put initial var: %v", err)
+	}
+	_, err = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+		ConsumerNamespace: "consumer-ns",
+		SourceNamespace:   "root-ns",
+		VariableName:     "var1",
+	})
+	if err != nil {
+		t.Fatalf("failed to register consumer: %v", err)
+	}
+
+	// Let initialize hook worker cycles clear if any
+	fakeClock.Advance(6 * time.Second)
+	time.Sleep(50 * time.Millisecond)
+
+	// Register hook URL now that initial setup is complete
+	_, err = server.RegisterCompletionHook(ctx, &pb.RegisterCompletionHookRequest{Url: testServer.URL})
+	if err != nil {
+		t.Fatalf("failed to register hook: %v", err)
+	}
+
+	// 1. KICK OFF ORGANIC ROOT ACTUATION
+	_, err = server.StartActuation(ctx, &pb.StartActuationRequest{
+		Namespace:     "root-ns",
+		ActuationUuid: "ROOT-UUID-1",
+	})
+	if err != nil {
+		t.Fatalf("failed to start root actuation: %v", err)
+	}
+
+	// Write variable version under ROOT-UUID-1
+	valNew, _ := structpb.NewValue("new-val")
+	_, err = server.PutVariable(ctx, &pb.PutVariableRequest{
+		Namespace:     "root-ns",
+		Name:          "var1",
+		Value:         valNew,
+		ActuationUuid: "ROOT-UUID-1",
+	})
+	if err != nil {
+		t.Fatalf("failed to put variable: %v", err)
+	}
+
+	// At this point, the root actuation finishes. But wait!
+	// It triggers propagation. Since consumer-ns has run_webhook_url, it is marked Affected
+	// and a webhook is queued.
+	fakeClock.Advance(2 * time.Second) // let debounce worker trigger propagation
+	time.Sleep(50 * time.Millisecond)
+
+	// The root actuation status is now "completed" in DB (from debounceSucceeded).
+	// But the cascade is NOT done because consumer-ns is in affected_namespaces (waiting to be run).
+	// Let's verify no completion hook fires yet.
+	fakeClock.Advance(5 * time.Second) // poll completion hook worker
+	time.Sleep(50 * time.Millisecond)
+
+	select {
+	case evs := <-received:
+		t.Fatalf("unexpected completion event received prematurely: %+v", evs)
+	default:
+	}
+
+	// Now simulate the consumer running under a trigger UUID, with parent ROOT-UUID-1
+	_, err = server.StartActuation(ctx, &pb.StartActuationRequest{
+		Namespace:            "consumer-ns",
+		ActuationUuid:        "CONSUMER-UUID-1",
+		ParentActuationUuids: []string{"ROOT-UUID-1"},
+	})
+	if err != nil {
+		t.Fatalf("failed to start consumer actuation: %v", err)
+	}
+
+	// The consumer is now actuating. The cascade is still active because consumer-ns is actuating in memory.
+	fakeClock.Advance(5 * time.Second) // poll completion hook worker (t=18)
+	time.Sleep(50 * time.Millisecond)
+	select {
+	case evs := <-received:
+		t.Fatalf("unexpected completion event received while consumer is active: %+v", evs)
+	default:
+	}
+
+	fakeClock.Advance(1 * time.Second) // Advance to t=19 before writing output
+
+	// Now the consumer finishes. Since it consumes from root-ns, we simulate success by putting a dummy variable
+	_, err = server.PutVariable(ctx, &pb.PutVariableRequest{
+		Namespace:     "consumer-ns",
+		Name:          "dummy-output",
+		Value:         valNew,
+		ActuationUuid: "CONSUMER-UUID-1",
+	})
+	if err != nil {
+		t.Fatalf("failed to put consumer output: %v", err)
+	}
+
+	// Advance to t=20 to trigger the ticker first, while debounce is not yet due
+	fakeClock.Advance(1 * time.Second)
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify no completion event fired at t=20 ticker poll because consumer is still active
+	select {
+	case evs := <-received:
+		t.Fatalf("unexpected completion event received at t=20: %+v", evs)
+	default:
+	}
+
+	// Advance to t=21 to let debounce (2s delay from t=19) fire and write completed status
+	fakeClock.Advance(1 * time.Second)
+	time.Sleep(50 * time.Millisecond)
+
+	// Verify no completion event yet (ticker is not due until t=25)
+	select {
+	case evs := <-received:
+		t.Fatalf("unexpected completion event received at t=21: %+v", evs)
+	default:
+	}
+
+	// Now advance to t=25 to let the ticker run
+	fakeClock.Advance(4 * time.Second)
+	time.Sleep(50 * time.Millisecond)
+
+	select {
+	case evs := <-received:
+		if len(evs) != 1 {
+			t.Fatalf("expected 1 event, got %d: %+v", len(evs), evs)
+		}
+		if evs[0].UUID != "ROOT-UUID-1" || evs[0].Status != "completed" {
+			t.Errorf("unexpected event: %+v", evs[0])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for completion hook event")
+	}
+}
+
+func TestCompletionHookStaleNotification(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	fakeClock := clockwork.NewFakeClock()
+	server := NewServerWithClock(store, fakeClock)
+	t.Cleanup(server.Stop)
+
+	// Set short max age (1 day)
+	server.SetMaxActuationAgeDays(1)
+
+	type hookEvent struct {
+		UUID   string
+		Status string
+	}
+	received := make(chan []hookEvent, 10)
+
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Completed []struct {
+				UUID   string `json:"uuid"`
+				Status string `json:"status"`
+			} `json:"completed_actuations"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var events []hookEvent
+		for _, c := range payload.Completed {
+			events = append(events, hookEvent{UUID: c.UUID, Status: c.Status})
+		}
+		received <- events
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer testServer.Close()
+
+	// Register hook URL
+	_, err := server.RegisterCompletionHook(ctx, &pb.RegisterCompletionHookRequest{Url: testServer.URL})
+	if err != nil {
+		t.Fatalf("failed to register hook: %v", err)
+	}
+
+	// Register namespaces
+	if err := store.RegisterNamespace(ctx, &Namespace{Name: "root-ns"}); err != nil {
+		t.Fatalf("failed to register root-ns: %v", err)
+	}
+
+	// 1. KICK OFF ORGANIC ROOT ACTUATION
+	_, err = server.StartActuation(ctx, &pb.StartActuationRequest{
+		Namespace:     "root-ns",
+		ActuationUuid: "ROOT-UUID-STALE",
+	})
+	if err != nil {
+		t.Fatalf("failed to start root actuation: %v", err)
+	}
+
+	// At this point, the root actuation starts. We don't write variables, it remains active.
+	// Let's advance the clock by 25 hours (exceeding 1 day)
+	fakeClock.Advance(25 * time.Hour)
+	time.Sleep(50 * time.Millisecond) // wait for worker to run on next tick
+
+	// The worker should evaluate it as stale and trigger hook!
+	select {
+	case evs := <-received:
+		if len(evs) != 1 {
+			t.Fatalf("expected 1 event, got %d: %+v", len(evs), evs)
+		}
+		if evs[0].UUID != "ROOT-UUID-STALE" || evs[0].Status != "stale" {
+			t.Errorf("unexpected event: %+v", evs[0])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for stale hook event")
+	}
+}
+
+
 
 
 

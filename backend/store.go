@@ -115,11 +115,19 @@ type Store interface {
 	GetActuationParents(ctx context.Context, uuid string) ([]string, error)
 	GetLastActuation(ctx context.Context, namespace string) (*Actuation, error)
 	GetActuationTrace(ctx context.Context, startUUID string) ([]*Actuation, []*LineageEdge, error)
+	GetUnnotifiedRootActuations(ctx context.Context) ([]*Actuation, error)
+	IsCascadeComplete(ctx context.Context, rootUUID string) (bool, error)
+	SetActuationNotified(ctx context.Context, uuid string, status string) error
 
 	// Affected namespaces tracking
 	RecordAffectedNamespace(ctx context.Context, ns string, causalUUIDs []string) error
 	ClearAffectedNamespace(ctx context.Context, ns string) error
 	GetCausalActuationUUIDs(ctx context.Context, ns string) ([]string, error)
+
+	// Completion Hooks
+	RegisterCompletionHook(ctx context.Context, url string) error
+	DeregisterCompletionHook(ctx context.Context, url string) error
+	ListCompletionHooks(ctx context.Context) ([]string, error)
 
 	Close() error
 }
@@ -209,6 +217,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		namespace TEXT NOT NULL,
 		source TEXT NOT NULL,
 		status TEXT NOT NULL,
+		completion_notified INTEGER DEFAULT 0,
 		created_at DATETIME NOT NULL,
 		FOREIGN KEY (namespace) REFERENCES namespaces(name) ON DELETE CASCADE
 	);
@@ -223,6 +232,11 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		causal_actuation_uuid TEXT NOT NULL,
 		PRIMARY KEY (namespace, causal_actuation_uuid),
 		FOREIGN KEY (namespace) REFERENCES namespaces(name) ON DELETE CASCADE
+	);
+	CREATE TABLE IF NOT EXISTS completion_hooks (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		url TEXT UNIQUE NOT NULL,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);`
 	if _, err := db.Exec(query); err != nil {
 		db.Close()
@@ -233,6 +247,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	_, _ = db.Exec("ALTER TABLE namespaces ADD COLUMN dedup_delay_minutes INTEGER DEFAULT 0;")
 	_, _ = db.Exec("ALTER TABLE namespaces ADD COLUMN max_dedup_changes INTEGER DEFAULT 0;")
 	_, _ = db.Exec("ALTER TABLE variables ADD COLUMN actuation_uuid TEXT;")
+	_, _ = db.Exec("ALTER TABLE actuations ADD COLUMN completion_notified INTEGER DEFAULT 0;")
 
 	return &SQLiteStore{db: db}, nil
 }
@@ -956,4 +971,105 @@ func (s *SQLiteStore) GetActuationTrace(ctx context.Context, startUUID string) (
 
 	return nodes, edges, nil
 }
+
+// RegisterCompletionHook registers a completion hook URL in the database.
+func (s *SQLiteStore) RegisterCompletionHook(ctx context.Context, url string) error {
+	_, err := s.db.ExecContext(ctx, "INSERT OR IGNORE INTO completion_hooks (url) VALUES (?);", url)
+	if err != nil {
+		return fmt.Errorf("failed to register completion hook: %w", err)
+	}
+	return nil
+}
+
+// DeregisterCompletionHook removes a registered completion hook URL from the database.
+func (s *SQLiteStore) DeregisterCompletionHook(ctx context.Context, url string) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM completion_hooks WHERE url = ?;", url)
+	if err != nil {
+		return fmt.Errorf("failed to deregister completion hook: %w", err)
+	}
+	return nil
+}
+
+// ListCompletionHooks returns all registered hook URLs.
+func (s *SQLiteStore) ListCompletionHooks(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT url FROM completion_hooks ORDER BY created_at ASC;")
+	if err != nil {
+		return nil, fmt.Errorf("failed to query completion hooks: %w", err)
+	}
+	defer rows.Close()
+
+	var urls []string
+	for rows.Next() {
+		var url string
+		if err := rows.Scan(&url); err != nil {
+			return nil, fmt.Errorf("failed to scan hook URL: %w", err)
+		}
+		urls = append(urls, url)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error reading hook URLs: %w", err)
+	}
+	return urls, nil
+}
+
+// GetUnnotifiedRootActuations returns all organic root actuations where completion hook has not been fired yet.
+func (s *SQLiteStore) GetUnnotifiedRootActuations(ctx context.Context) ([]*Actuation, error) {
+	query := `
+		SELECT uuid, namespace, source, status, created_at 
+		FROM actuations
+		WHERE completion_notified = 0
+		  AND uuid NOT IN (SELECT actuation_uuid FROM actuation_lineage);
+	`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query unnotified root actuations: %w", err)
+	}
+	defer rows.Close()
+
+	var acts []*Actuation
+	for rows.Next() {
+		var act Actuation
+		if err := rows.Scan(&act.UUID, &act.Namespace, &act.Source, &act.Status, &act.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan actuation: %w", err)
+		}
+		acts = append(acts, &act)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error reading actuations: %w", err)
+	}
+	return acts, nil
+}
+
+// IsCascadeComplete evaluates if a root UUID's cascade is completely finished.
+func (s *SQLiteStore) IsCascadeComplete(ctx context.Context, rootUUID string) (bool, error) {
+	query := `
+		WITH RECURSIVE descendants(uuid) AS (
+			SELECT ? AS uuid
+			UNION ALL
+			SELECT l.actuation_uuid
+			FROM actuation_lineage l
+			JOIN descendants d ON l.parent_actuation_uuid = d.uuid
+		)
+		SELECT 
+			(SELECT COUNT(*) FROM actuations WHERE uuid IN (SELECT uuid FROM descendants) AND status IN ('actuating', 'triggered')) AS active_count,
+			(SELECT COUNT(*) FROM affected_namespaces WHERE causal_actuation_uuid IN (SELECT uuid FROM descendants)) AS affected_count,
+			(SELECT COUNT(*) FROM pending_webhook_parents WHERE parent_actuation_uuid IN (SELECT uuid FROM descendants)) AS pending_count;
+	`
+	var activeCount, affectedCount, pendingCount int
+	err := s.db.QueryRowContext(ctx, query, rootUUID).Scan(&activeCount, &affectedCount, &pendingCount)
+	if err != nil {
+		return false, fmt.Errorf("failed to check cascade completion: %w", err)
+	}
+	return (activeCount + affectedCount + pendingCount) == 0, nil
+}
+
+// SetActuationNotified marks the root actuation status as completed/stale and notified.
+func (s *SQLiteStore) SetActuationNotified(ctx context.Context, uuid string, status string) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE actuations SET status = ?, completion_notified = 1 WHERE uuid = ?;", status, uuid)
+	if err != nil {
+		return fmt.Errorf("failed to set actuation notified: %w", err)
+	}
+	return nil
+}
+
 

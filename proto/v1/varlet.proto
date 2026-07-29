@@ -27,6 +27,11 @@ service VarletService {
   // Graph operations
   rpc GetDependencyGraph(GetDependencyGraphRequest) returns (GetDependencyGraphResponse);
   rpc GetActuationTrace(GetActuationTraceRequest) returns (GetActuationTraceResponse);
+
+  // Completion Hooks
+  rpc RegisterCompletionHook(RegisterCompletionHookRequest) returns (RegisterCompletionHookResponse);
+  rpc DeregisterCompletionHook(DeregisterCompletionHookRequest) returns (DeregisterCompletionHookResponse);
+  rpc ListCompletionHooks(ListCompletionHooksRequest) returns (ListCompletionHooksResponse);
 }
 
 message RetentionPolicy {
@@ -179,4 +184,23 @@ message StartActuationRequest {
 }
 
 message StartActuationResponse {}
+
+message RegisterCompletionHookRequest {
+  string url = 1;
+}
+
+message RegisterCompletionHookResponse {}
+
+message DeregisterCompletionHookRequest {
+  string url = 1;
+}
+
+message DeregisterCompletionHookResponse {}
+
+message ListCompletionHooksRequest {}
+
+message ListCompletionHooksResponse {
+  repeated string urls = 1;
+}
+
 
