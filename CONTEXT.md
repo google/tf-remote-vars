@@ -39,4 +39,8 @@ The process of applying changes to a Stack (typically via `terraform apply`). Ac
 **Actuation Lineage**:
 The audit trail of parent-child relationships between actuations. A webhook-triggered actuation will have one or more parent Actuation UUIDs that caused the trigger.
 
+**Completion Hook**:
+A global registry of webhook endpoints notified when the cascade triggered by an organic root actuation completely finishes (i.e., all downstream runs are completed, and no more changes are pending or active).
 
+**Stale/Defunct Actuation**:
+An organic actuation whose cascade has exceeded `max_actuation_age_days` (default 3) and is transitioned to a stale/expired state, triggering completion callbacks to prevent deadlocks from manual downstream steps that were never run.
