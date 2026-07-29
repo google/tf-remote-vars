@@ -315,6 +315,19 @@ func (s *Server) DeleteVariable(ctx context.Context, req *pb.DeleteVariableReque
 		return nil, status.Errorf(codes.Internal, "failed to delete variable: %v", err)
 	}
 
+	if req.GetActuationUuid() != "" {
+		act := &Actuation{
+			UUID:      req.GetActuationUuid(),
+			Namespace: ns,
+			Source:    "organic",
+			Status:    "completed",
+			CreatedAt: s.clock.Now(),
+		}
+		if err := s.store.CreateActuation(ctx, act, nil); err != nil {
+			log.Printf("[WARNING] failed to record actuation for delete: %v", err)
+		}
+	}
+
 	return &pb.DeleteVariableResponse{}, nil
 }
 

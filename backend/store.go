@@ -191,7 +191,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	);
 	CREATE TABLE IF NOT EXISTS actuations (
 		uuid TEXT PRIMARY KEY,
-		namespace TEXT NOT NULL,
+		namespace TEXT,
 		source TEXT NOT NULL,
 		status TEXT NOT NULL,
 		created_at DATETIME NOT NULL,
@@ -674,6 +674,14 @@ func (s *SQLiteStore) CreateActuation(ctx context.Context, act *Actuation, paren
 	}
 
 	for _, p := range parentUUIDs {
+		// Ensure parent actuation exists (if it doesn't, we insert a placeholder with NULL namespace to avoid FK constraint failures)
+		_, err = tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO actuations (uuid, namespace, source, status, created_at) 
+			VALUES (?, NULL, 'organic', 'completed', ?)`, p, act.CreatedAt)
+		if err != nil {
+			return fmt.Errorf("failed to ensure parent actuation exists: %w", err)
+		}
+
 		_, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO actuation_lineage (actuation_uuid, parent_actuation_uuid) VALUES (?, ?)", act.UUID, p)
 		if err != nil {
 			return fmt.Errorf("failed to insert actuation lineage: %w", err)

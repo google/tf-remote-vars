@@ -432,12 +432,22 @@ func TestDeleteVariableSuccess(t *testing.T) {
 	}
 
 	req := &pb.DeleteVariableRequest{
-		Namespace: "ns1",
-		Name:      "var1",
+		Namespace:     "ns1",
+		Name:          "var1",
+		ActuationUuid: "delete-actuation-uuid",
 	}
 	_, err = server.DeleteVariable(ctx, req)
 	if err != nil {
 		t.Fatalf("DeleteVariable failed: %v", err)
+	}
+
+	act, err := store.GetActuation(ctx, "delete-actuation-uuid")
+	if err != nil {
+		t.Errorf("failed to retrieve delete actuation: %v", err)
+	} else {
+		if act.Namespace != "ns1" || act.Status != "completed" {
+			t.Errorf("unexpected actuation record: %+v", act)
+		}
 	}
 
 	_, err = store.GetLatestVariable(ctx, "ns1", "var1")
