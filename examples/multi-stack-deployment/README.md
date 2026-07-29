@@ -35,9 +35,15 @@ graph TD
    Namespaces only permit consumption by stacks that are explicitly configured in their `allowed_consumers` list.
 2. **Public Namespace:**
    The `bootstrap` stack demonstrates a public namespace by setting `allowed_consumers = ["*"]`, making its variables consumable by any stack.
-3. **Webhook Propagation Delay:**
-   The `tagging_service` stack is configured with `webhook_delay_minutes = 2` alongside its `run_webhook_url`. When `bootstrap` updates and notifies its consumers, the backend waits for 2 minutes before triggering the `tagging_service` webhook, simulating a stack actuation delay without blocking the upstream bootstrap run.
-4. **Rich Variable Types:**
+3. **Webhook Propagation Delay & Deduplication:**
+   Demonstrates delaying and debouncing outgoing webhook triggers:
+   * **Delay:** The `tagging_service` stack is configured with `webhook_delay_minutes = 2` to simulate a stack actuation delay without blocking the upstream bootstrap run.
+   * **Deduplication:** Uses `dedup_delay_minutes` and `max_dedup_changes` to pool multiple writes to upstream dependencies into a single downstream trigger execution, preventing redundant runs.
+4. **Actuation Lineage Tracking:**
+   Tracks individual Terraform run UUIDs (`VARLET_ACTUATION_UUID`) and maps their parent-child relationships (`VARLET_UPSTREAM_ACTUATION_UUIDS`) in the database on apply, forming a lineage DAG.
+5. **Ancestry Trace & Graph Highlighting:**
+   Allows operators to query a recursive CTE ancestry path (`/api/trace`) for a specific actuation, highlighting the exact path of affected nodes and edges on the graph while fading out non-participating components.
+6. **Rich Variable Types:**
    Demonstrates passing diverse Terraform types over Varlet, including:
    * **Strings:** (`organization_id`, `deployment_id`, `environment_tag_value`)
    * **Lists:** (`tag_keys`, `org_policy_constraints`)
@@ -166,4 +172,72 @@ Open your browser and navigate to:
 3. **Actuation Simulation:** Double-click the `bootstrap` node to trigger a simulated update. Click "Next Step" to advance propagation step-by-step:
    * Notice that when `bootstrap` updates, `tagging_service`'s state turns to `potentially-affected` and then transitions to `actuating` with the 2-minute delay simulated visually.
    * Watch the state changes propagate downstream to the `regional_landing_zones` nodes.
+
+---
+
+## Step-by-Step Feature Showcase
+
+Here is a step-by-step walkthrough to demonstrate the core features of **Varlet**, including authorization, webhook deduplication, actuation lineage, and interactive tracing.
+
+### 1. Demonstrate Private-by-Default Security
+Varlet namespaces are private by default. Let's see this in action:
+1. Navigate to the `tagging_service` directory and inspect `main.tf`. It consumes variables from `bootstrap`.
+2. Open `bootstrap/main.tf` and temporarily remove `"tagging_service"` from the `allowed_consumers` list on the `varlet_namespace.self` resource.
+3. Run `terraform apply` in `bootstrap` to apply the change.
+4. Now, go to `tagging_service` and run `terraform plan`. It will fail with a `PermissionDenied` error because `tagging_service` is no longer authorized to consume variables from `bootstrap`.
+5. Restore the allowed consumers in `bootstrap/main.tf` and run `terraform apply` again to restore access.
+
+### 2. Run Actuations with Lineage Tracking
+In a real CI/CD pipeline, each stack run has a unique run ID, and downstream runs are triggered by upstream runs. We can simulate this using the `VARLET_ACTUATION_UUID` and `VARLET_UPSTREAM_ACTUATION_UUIDS` environment variables:
+
+1. **Start the Bootstrap Actuation:**
+   Generate a UUID for the bootstrap run and apply:
+   ```bash
+   export BOOTSTRAP_UUID=$(uuidgen)
+   cd examples/multi-stack-deployment/bootstrap
+   VARLET_ACTUATION_UUID=$BOOTSTRAP_UUID terraform apply -auto-approve
+   ```
+   This registers the `bootstrap` actuation with ID `$BOOTSTRAP_UUID` in the backend.
+
+2. **Start the Tagging Service Actuation:**
+   Since `tagging_service` depends on `bootstrap`, we pass the bootstrap run ID as the parent:
+   ```bash
+   export TAGGING_UUID=$(uuidgen)
+   cd ../tagging_service
+   VARLET_ACTUATION_UUID=$TAGGING_UUID VARLET_UPSTREAM_ACTUATION_UUIDS=$BOOTSTRAP_UUID terraform apply -auto-approve
+   ```
+   This establishes a parent-child relationship: `$BOOTSTRAP_UUID` -> `$TAGGING_UUID`.
+
+3. **Start downstream Security Tier 1 Actuation:**
+   Similarly, run `security_tier_1` passing `tagging_service`'s run ID as parent:
+   ```bash
+   export TIER1_UUID=$(uuidgen)
+   cd ../security_tier_1
+   VARLET_ACTUATION_UUID=$TIER1_UUID VARLET_UPSTREAM_ACTUATION_UUIDS=$TAGGING_UUID terraform apply -auto-approve
+   ```
+
+### 3. Showcase Webhook Deduplication
+We can demonstrate webhook deduplication using the `tagging_service` namespace, which is configured with `dedup_delay_minutes = 2` and `max_dedup_changes = 3`.
+
+1. Check the Varlet server log. When `bootstrap` writes its outputs, Varlet does not fire webhooks immediately. Instead, it queues a pending webhook for `tagging_service` and `policy_engine`.
+2. If you write to `bootstrap` multiple times (e.g. updating a variable value), the server consolidates these writes into the same pending webhook trigger, updating its `fire_at` target.
+3. Once the 2-minute quiet window expires (or 3 distinct changes are accumulated), the background worker fires the webhook, generating a new `Trigger UUID`.
+4. The database records all the accumulated bootstrap parent actuation UUIDs mapping to this new Trigger UUID.
+
+### 4. Interactive Ancestry Trace in the Web UI
+Now let's use the Web UI to visualize the dependency status and trace the actuation path:
+
+1. Open [http://localhost:8081](http://localhost:8081) in your browser.
+2. You will see the current status of all nodes:
+   * **Succeeded (Green):** Stacks that have recently finished their actuations.
+   * **Affected (Orange):** Stacks whose upstream dependencies have updated, but they haven't run yet to ingest the new values.
+3. Click on the `security_tier_1` node. The right-hand **Sidebar** will slide open showing:
+   * Current status and metadata.
+   * **Causal Actuation UUIDs:** A list of upstream run IDs that made this node "affected". You should see the `$TAGGING_UUID` we passed earlier.
+   * **Last Actuation UUID:** The ID of the last successful run for this stack (`$TIER1_UUID`).
+4. Click on one of the UUIDs in the **Causal Actuation UUIDs** list.
+5. The UI will call the `/api/trace` endpoint, fetch the recursive parent lineage, and highlight the path:
+   * The graph will fade out non-participating nodes.
+   * The exact path of nodes and edges representing the propagation chain (e.g., `bootstrap` &rarr; `tagging_service` &rarr; `security_tier_1`) will be highlighted in bright orange.
+6. Click the "Exit Trace" button in the sidebar or press the `Escape` key to clear the highlight and return the graph to its normal state.
 
