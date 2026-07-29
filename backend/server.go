@@ -745,16 +745,14 @@ func (s *Server) processPendingWebhooks(ctx context.Context) {
 			continue
 		}
 
-		if ns.RunWebhookURL == "" {
-			s.promoteTriggerToActuation(ctx, info.TriggerUUID, info.ConsumerNamespace, parents)
-			_ = s.store.RemovePendingWebhook(ctx, info.ConsumerNamespace)
-			continue
-		}
-
 		s.promoteTriggerToActuation(ctx, info.TriggerUUID, info.ConsumerNamespace, parents)
 
 		if err := s.store.RemovePendingWebhook(ctx, info.ConsumerNamespace); err != nil {
 			log.Printf("[ERROR] failed to remove pending webhook for %s: %v", info.ConsumerNamespace, err)
+			continue
+		}
+
+		if ns.RunWebhookURL == "" {
 			continue
 		}
 
