@@ -5,7 +5,7 @@ Implement webhook propagation delays in the backend server. When a variable upda
 
 **Blocked by:** 0005 — Webhook Delay Proto and Storage Schema
 
-**Status:** ready-for-agent
+**Status:** completed
 
 - [x] Server `RegisterNamespace` API maps gRPC request `webhook_delay_minutes` to the namespace store.
 - [x] Server `GetNamespace` API returns `webhook_delay_minutes`.

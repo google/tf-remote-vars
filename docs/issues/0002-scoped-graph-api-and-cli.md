@@ -5,7 +5,7 @@ The ability for operators to retrieve a filtered subset of the dependency graph 
 
 **Blocked by:** None
 
-**Status:** ready-for-agent
+**Status:** completed
 
 - [x] The `GetDependencyGraphRequest` proto message supports `upstream_depth` (int32) parameter.
 - [x] The backend `GetDependencyGraph` implementation correctly traverses downstream descendants (unlimited) and upstream ancestors (limited by `upstream_depth`).

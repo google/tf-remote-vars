@@ -5,7 +5,7 @@ Enforce a "private by default" security model for Varlet namespaces. By default,
 
 **Blocked by:** 0003 — Embedded Web UI and Actuation Simulation
 
-**Status:** ready-for-agent
+**Status:** completed
 
 - [x] Empty `allowed_consumers` list in a namespace blocks other namespaces from registering as consumers or reading its variables (returns `PermissionDenied`).
 - [x] Setting `allowed_consumers = ["*"]` allows any consumer namespace to read variables.

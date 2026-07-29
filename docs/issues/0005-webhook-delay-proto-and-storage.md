@@ -5,7 +5,7 @@ Extend the Varlet gRPC API contract and SQLite database schema to support the ne
 
 **Blocked by:** 0004 — Private by Default Namespaces
 
-**Status:** ready-for-agent
+**Status:** completed
 
 - [x] `RegisterNamespaceRequest` (proto) supports `webhook_delay_minutes` (int32).
 - [x] `GetNamespaceResponse` (proto) supports `webhook_delay_minutes` (int32).

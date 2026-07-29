@@ -5,7 +5,7 @@ Create a complete multi-stack Terraform configuration example under `examples/mu
 
 **Blocked by:** 0007 — Terraform Provider Webhook Delay Support
 
-**Status:** ready-for-agent
+**Status:** completed
 
 - [x] Folder structure contains directories for `bootstrap`, `tagging_service`, `security_tier_1`, `security_tier_2`, `policy_engine`, `lockdown_enforcer`, and `regional_landing_zones`.
 - [x] Stacks explicitly use `depends_on = [varlet_namespace.self]` to assert that their own namespace is registered before writing outputs or registering consumers.

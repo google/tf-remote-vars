@@ -5,7 +5,7 @@ Expose the `webhook_delay_minutes` attribute on the `varlet_namespace` Terraform
 
 **Blocked by:** 0006 — Backend Webhook Delay Logic
 
-**Status:** ready-for-agent
+**Status:** completed
 
 - [x] `varlet_namespace` resource schema includes `webhook_delay_minutes` (Int64, computed, default 0).
 - [x] Model `NamespaceResourceModel` updated with `WebhookDelayMinutes` property.

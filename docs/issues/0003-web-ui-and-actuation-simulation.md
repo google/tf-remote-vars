@@ -5,7 +5,7 @@ An interactive Web UI served directly by the Varlet server that visualizes the d
 
 **Blocked by:** 0002 — Scoped Dependency Graph API and CLI Exporter
 
-**Status:** ready-for-agent
+**Status:** completed
 
 - [x] The `varlet-server` binary runs both a gRPC server and a parallel HTTP server.
 - [x] The HTTP server exposes `GET /api/graph` returning the graph in JSON format (supporting `root` and `upstream_depth` query parameters).
