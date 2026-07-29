@@ -2,8 +2,11 @@ package provider
 
 import (
 	"context"
+	"os"
+	"strings"
 
 	pb "github.com/google/varlet/proto/v1"
+	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
@@ -29,8 +32,9 @@ type VarletProviderModel struct {
 
 // VarletProviderData holds the configured client and metadata.
 type VarletProviderData struct {
-	Client    pb.VarletServiceClient
-	Namespace string
+	Client        pb.VarletServiceClient
+	Namespace     string
+	ActuationUUID string
 }
 
 func New(version string) func() provider.Provider {
@@ -92,9 +96,26 @@ func (p *VarletProvider) Configure(ctx context.Context, req provider.ConfigureRe
 
 	client := pb.NewVarletServiceClient(conn)
 
+	actUUID := os.Getenv("VARLET_ACTUATION_UUID")
+	if actUUID == "" {
+		actUUID = uuid.New().String()
+	}
+
+	var upstreamUUIDs []string
+	if upstreams := os.Getenv("VARLET_UPSTREAM_ACTUATION_UUIDS"); upstreams != "" {
+		for _, u := range strings.Split(upstreams, ",") {
+			trimmed := strings.TrimSpace(u)
+			if trimmed != "" {
+				upstreamUUIDs = append(upstreamUUIDs, trimmed)
+			}
+		}
+	}
+
 	if namespace != "" {
 		_, err := client.StartActuation(ctx, &pb.StartActuationRequest{
-			Namespace: namespace,
+			Namespace:             namespace,
+			ActuationUuid:         actUUID,
+			ParentActuationUuids: upstreamUUIDs,
 		})
 		if err != nil {
 			resp.Diagnostics.AddWarning(
@@ -105,8 +126,9 @@ func (p *VarletProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	}
 
 	providerData := &VarletProviderData{
-		Client:    client,
-		Namespace: namespace,
+		Client:        client,
+		Namespace:     namespace,
+		ActuationUUID: actUUID,
 	}
 
 	resp.DataSourceData = providerData

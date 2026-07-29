@@ -80,6 +80,8 @@ type RegisterNamespaceRequest struct {
 	RetentionPolicy     *RetentionPolicy       `protobuf:"bytes,2,opt,name=retention_policy,json=retentionPolicy,proto3" json:"retention_policy,omitempty"`
 	RunWebhookUrl       string                 `protobuf:"bytes,3,opt,name=run_webhook_url,json=runWebhookUrl,proto3" json:"run_webhook_url,omitempty"`
 	WebhookDelayMinutes int32                  `protobuf:"varint,4,opt,name=webhook_delay_minutes,json=webhookDelayMinutes,proto3" json:"webhook_delay_minutes,omitempty"`
+	DedupDelayMinutes   int32                  `protobuf:"varint,5,opt,name=dedup_delay_minutes,json=dedupDelayMinutes,proto3" json:"dedup_delay_minutes,omitempty"`
+	MaxDedupChanges     int32                  `protobuf:"varint,6,opt,name=max_dedup_changes,json=maxDedupChanges,proto3" json:"max_dedup_changes,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -138,6 +140,20 @@ func (x *RegisterNamespaceRequest) GetRunWebhookUrl() string {
 func (x *RegisterNamespaceRequest) GetWebhookDelayMinutes() int32 {
 	if x != nil {
 		return x.WebhookDelayMinutes
+	}
+	return 0
+}
+
+func (x *RegisterNamespaceRequest) GetDedupDelayMinutes() int32 {
+	if x != nil {
+		return x.DedupDelayMinutes
+	}
+	return 0
+}
+
+func (x *RegisterNamespaceRequest) GetMaxDedupChanges() int32 {
+	if x != nil {
+		return x.MaxDedupChanges
 	}
 	return 0
 }
@@ -237,6 +253,8 @@ type GetNamespaceResponse struct {
 	RetentionPolicy     *RetentionPolicy       `protobuf:"bytes,3,opt,name=retention_policy,json=retentionPolicy,proto3" json:"retention_policy,omitempty"`
 	RunWebhookUrl       string                 `protobuf:"bytes,4,opt,name=run_webhook_url,json=runWebhookUrl,proto3" json:"run_webhook_url,omitempty"`
 	WebhookDelayMinutes int32                  `protobuf:"varint,5,opt,name=webhook_delay_minutes,json=webhookDelayMinutes,proto3" json:"webhook_delay_minutes,omitempty"`
+	DedupDelayMinutes   int32                  `protobuf:"varint,6,opt,name=dedup_delay_minutes,json=dedupDelayMinutes,proto3" json:"dedup_delay_minutes,omitempty"`
+	MaxDedupChanges     int32                  `protobuf:"varint,7,opt,name=max_dedup_changes,json=maxDedupChanges,proto3" json:"max_dedup_changes,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -306,12 +324,27 @@ func (x *GetNamespaceResponse) GetWebhookDelayMinutes() int32 {
 	return 0
 }
 
+func (x *GetNamespaceResponse) GetDedupDelayMinutes() int32 {
+	if x != nil {
+		return x.DedupDelayMinutes
+	}
+	return 0
+}
+
+func (x *GetNamespaceResponse) GetMaxDedupChanges() int32 {
+	if x != nil {
+		return x.MaxDedupChanges
+	}
+	return 0
+}
+
 type PutVariableRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Namespace      string                 `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	Name           string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Value          *structpb.Value        `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"`
 	ForceActuation bool                   `protobuf:"varint,4,opt,name=force_actuation,json=forceActuation,proto3" json:"force_actuation,omitempty"` // If true, force consumers to re-apply even if value is unchanged
+	ActuationUuid  string                 `protobuf:"bytes,5,opt,name=actuation_uuid,json=actuationUuid,proto3" json:"actuation_uuid,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -374,6 +407,13 @@ func (x *PutVariableRequest) GetForceActuation() bool {
 	return false
 }
 
+func (x *PutVariableRequest) GetActuationUuid() string {
+	if x != nil {
+		return x.ActuationUuid
+	}
+	return ""
+}
+
 type PutVariableResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -415,6 +455,7 @@ type DeleteVariableRequest struct {
 	Namespace     string                 `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Force         bool                   `protobuf:"varint,3,opt,name=force,proto3" json:"force,omitempty"` // If true, force deletion even if there are active consumers.
+	ActuationUuid string                 `protobuf:"bytes,4,opt,name=actuation_uuid,json=actuationUuid,proto3" json:"actuation_uuid,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -468,6 +509,13 @@ func (x *DeleteVariableRequest) GetForce() bool {
 		return x.Force
 	}
 	return false
+}
+
+func (x *DeleteVariableRequest) GetActuationUuid() string {
+	if x != nil {
+		return x.ActuationUuid
+	}
+	return ""
 }
 
 type DeleteVariableResponse struct {
@@ -1087,10 +1135,12 @@ func (x *GetDependencyGraphResponse) GetStatuses() map[string]string {
 }
 
 type StartActuationRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Namespace     string                 `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	Namespace            string                 `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	ActuationUuid        string                 `protobuf:"bytes,2,opt,name=actuation_uuid,json=actuationUuid,proto3" json:"actuation_uuid,omitempty"`
+	ParentActuationUuids []string               `protobuf:"bytes,3,rep,name=parent_actuation_uuids,json=parentActuationUuids,proto3" json:"parent_actuation_uuids,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *StartActuationRequest) Reset() {
@@ -1128,6 +1178,20 @@ func (x *StartActuationRequest) GetNamespace() string {
 		return x.Namespace
 	}
 	return ""
+}
+
+func (x *StartActuationRequest) GetActuationUuid() string {
+	if x != nil {
+		return x.ActuationUuid
+	}
+	return ""
+}
+
+func (x *StartActuationRequest) GetParentActuationUuids() []string {
+	if x != nil {
+		return x.ParentActuationUuids
+	}
+	return nil
 }
 
 type StartActuationResponse struct {
@@ -1174,32 +1238,38 @@ const file_proto_v1_varlet_proto_rawDesc = "" +
 	"\x0fRetentionPolicy\x12!\n" +
 	"\fmin_versions\x18\x01 \x01(\x05R\vminVersions\x12 \n" +
 	"\fmax_age_days\x18\x02 \x01(\x05R\n" +
-	"maxAgeDays\"\xd1\x01\n" +
+	"maxAgeDays\"\xad\x02\n" +
 	"\x18RegisterNamespaceRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12E\n" +
 	"\x10retention_policy\x18\x02 \x01(\v2\x1a.varlet.v1.RetentionPolicyR\x0fretentionPolicy\x12&\n" +
 	"\x0frun_webhook_url\x18\x03 \x01(\tR\rrunWebhookUrl\x122\n" +
-	"\x15webhook_delay_minutes\x18\x04 \x01(\x05R\x13webhookDelayMinutes\"/\n" +
+	"\x15webhook_delay_minutes\x18\x04 \x01(\x05R\x13webhookDelayMinutes\x12.\n" +
+	"\x13dedup_delay_minutes\x18\x05 \x01(\x05R\x11dedupDelayMinutes\x12*\n" +
+	"\x11max_dedup_changes\x18\x06 \x01(\x05R\x0fmaxDedupChanges\"/\n" +
 	"\x19RegisterNamespaceResponse\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\")\n" +
 	"\x13GetNamespaceRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"\xfa\x01\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"\xd6\x02\n" +
 	"\x14GetNamespaceResponse\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12+\n" +
 	"\x11allowed_consumers\x18\x02 \x03(\tR\x10allowedConsumers\x12E\n" +
 	"\x10retention_policy\x18\x03 \x01(\v2\x1a.varlet.v1.RetentionPolicyR\x0fretentionPolicy\x12&\n" +
 	"\x0frun_webhook_url\x18\x04 \x01(\tR\rrunWebhookUrl\x122\n" +
-	"\x15webhook_delay_minutes\x18\x05 \x01(\x05R\x13webhookDelayMinutes\"\x9d\x01\n" +
+	"\x15webhook_delay_minutes\x18\x05 \x01(\x05R\x13webhookDelayMinutes\x12.\n" +
+	"\x13dedup_delay_minutes\x18\x06 \x01(\x05R\x11dedupDelayMinutes\x12*\n" +
+	"\x11max_dedup_changes\x18\a \x01(\x05R\x0fmaxDedupChanges\"\xc4\x01\n" +
 	"\x12PutVariableRequest\x12\x1c\n" +
 	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12,\n" +
 	"\x05value\x18\x03 \x01(\v2\x16.google.protobuf.ValueR\x05value\x12'\n" +
-	"\x0fforce_actuation\x18\x04 \x01(\bR\x0eforceActuation\"\x15\n" +
-	"\x13PutVariableResponse\"_\n" +
+	"\x0fforce_actuation\x18\x04 \x01(\bR\x0eforceActuation\x12%\n" +
+	"\x0eactuation_uuid\x18\x05 \x01(\tR\ractuationUuid\"\x15\n" +
+	"\x13PutVariableResponse\"\x86\x01\n" +
 	"\x15DeleteVariableRequest\x12\x1c\n" +
 	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
-	"\x05force\x18\x03 \x01(\bR\x05force\"\x18\n" +
+	"\x05force\x18\x03 \x01(\bR\x05force\x12%\n" +
+	"\x0eactuation_uuid\x18\x04 \x01(\tR\ractuationUuid\"\x18\n" +
 	"\x16DeleteVariableResponse\"\x98\x01\n" +
 	"\x17RegisterConsumerRequest\x12-\n" +
 	"\x12consumer_namespace\x18\x01 \x01(\tR\x11consumerNamespace\x12)\n" +
@@ -1239,9 +1309,11 @@ const file_proto_v1_varlet_proto_rawDesc = "" +
 	"\bstatuses\x18\x03 \x03(\v23.varlet.v1.GetDependencyGraphResponse.StatusesEntryR\bstatuses\x1a;\n" +
 	"\rStatusesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"5\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x92\x01\n" +
 	"\x15StartActuationRequest\x12\x1c\n" +
-	"\tnamespace\x18\x01 \x01(\tR\tnamespace\"\x18\n" +
+	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12%\n" +
+	"\x0eactuation_uuid\x18\x02 \x01(\tR\ractuationUuid\x124\n" +
+	"\x16parent_actuation_uuids\x18\x03 \x03(\tR\x14parentActuationUuids\"\x18\n" +
 	"\x16StartActuationResponse2\x9f\a\n" +
 	"\rVarletService\x12^\n" +
 	"\x11RegisterNamespace\x12#.varlet.v1.RegisterNamespaceRequest\x1a$.varlet.v1.RegisterNamespaceResponse\x12O\n" +

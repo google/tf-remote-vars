@@ -30,5 +30,13 @@ The directed graph representing relationships between stacks. Nodes represent na
 The required state of the Dependency Graph. The backend enforces that no cycles (loops) can be created (e.g., A depends on B, and B depends on A).
 
 **Actuation**:
-The process of applying changes to a Stack (typically via `terraform apply`). Actuating a stack may update its exported variables, which can affect downstream consumer stacks.
+The process of applying changes to a Stack (typically via `terraform apply`). Actuating a stack may update its exported variables, which can affect downstream consumer stacks. Every actuation is tracked by a unique **Actuation UUID**.
+
+**Actuation Source**:
+*   **Organic**: An actuation triggered by a user (e.g. CLI run, breakglass) or a direct code change.
+*   **Webhook-triggered**: An actuation automatically triggered by Varlet because upstream parent stacks had changes.
+
+**Actuation Lineage**:
+The audit trail of parent-child relationships between actuations. A webhook-triggered actuation will have one or more parent Actuation UUIDs that caused the trigger.
+
 

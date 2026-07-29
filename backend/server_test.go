@@ -37,6 +37,7 @@ func TestRegisterNamespaceSuccess(t *testing.T) {
 	ctx := t.Context()
 	store := newTestStore(t)
 	server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 	req := &pb.RegisterNamespaceRequest{
 		Name: "test-namespace",
@@ -67,6 +68,7 @@ func TestRegisterNamespaceError(t *testing.T) {
 		ctx := t.Context()
 		store := newTestStore(t)
 		server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 		req := &pb.RegisterNamespaceRequest{
 			Name: "",
@@ -89,6 +91,7 @@ func TestRegisterNamespaceError(t *testing.T) {
 		ctx := t.Context()
 		store := newTestStore(t)
 		server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 		req := &pb.RegisterNamespaceRequest{
 			Name:          "upsert-ns",
@@ -119,6 +122,7 @@ func TestRegisterNamespaceError(t *testing.T) {
 		ctx := t.Context()
 		store := newTestStore(t)
 		server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 		req := &pb.RegisterNamespaceRequest{
 			Name:                "invalid-ns",
@@ -143,6 +147,7 @@ func TestGetNamespaceSuccess(t *testing.T) {
 	ctx := t.Context()
 	store := newTestStore(t)
 	server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 	// Pre-register
 	err := store.RegisterNamespace(ctx, &Namespace{Name: "existing"})
@@ -170,6 +175,7 @@ func TestGetNamespaceError(t *testing.T) {
 		ctx := t.Context()
 		store := newTestStore(t)
 		server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 		req := &pb.GetNamespaceRequest{
 			Name: "",
@@ -192,6 +198,7 @@ func TestGetNamespaceError(t *testing.T) {
 		ctx := t.Context()
 		store := newTestStore(t)
 		server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 		req := &pb.GetNamespaceRequest{
 			Name: "non-existent",
@@ -215,6 +222,7 @@ func TestPutVariableSuccess(t *testing.T) {
 	ctx := t.Context()
 	store := newTestStore(t)
 	server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 	err := store.RegisterNamespace(ctx, &Namespace{Name: "ns1"})
 	if err != nil {
@@ -313,6 +321,7 @@ func TestPutVariableError(t *testing.T) {
 	ctx := t.Context()
 	store := newTestStore(t)
 	server := NewServer(store)
+	t.Cleanup(server.Stop)
 	val, err := structpb.NewValue("val")
 	if err != nil {
 		t.Fatalf("failed to create value: %v", err)
@@ -392,6 +401,7 @@ func TestDeleteVariableSuccess(t *testing.T) {
 	ctx := t.Context()
 	store := newTestStore(t)
 	server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 	err := store.RegisterNamespace(ctx, &Namespace{Name: "ns1"})
 	if err != nil {
@@ -444,6 +454,7 @@ func TestDeleteVariableError(t *testing.T) {
 		ctx := t.Context()
 		store := newTestStore(t)
 		server := NewServer(store)
+	t.Cleanup(server.Stop)
 		req := &pb.DeleteVariableRequest{
 			Namespace: "",
 			Name:      "var",
@@ -463,6 +474,7 @@ func TestDeleteVariableError(t *testing.T) {
 		ctx := t.Context()
 		store := newTestStore(t)
 		server := NewServer(store)
+	t.Cleanup(server.Stop)
 		req := &pb.DeleteVariableRequest{
 			Namespace: "ns",
 			Name:      "",
@@ -483,6 +495,7 @@ func TestRegisterConsumerSuccess(t *testing.T) {
 	ctx := t.Context()
 	store := newTestStore(t)
 	server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 	if err := store.RegisterNamespace(ctx, &Namespace{Name: "source-ns"}); err != nil {
 		t.Fatalf("failed to register source namespace: %v", err)
@@ -543,6 +556,7 @@ func TestRegisterConsumerCycleDetection(t *testing.T) {
 	ctx := t.Context()
 	store := newTestStore(t)
 	server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 	for _, ns := range []string{"A", "B", "C"} {
 		if err := store.RegisterNamespace(ctx, &Namespace{Name: ns}); err != nil {
@@ -619,6 +633,7 @@ func TestGetVariableValueSuccess(t *testing.T) {
 	ctx := t.Context()
 	store := newTestStore(t)
 	server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 	if err := store.RegisterNamespace(ctx, &Namespace{Name: "ns1"}); err != nil {
 		t.Fatalf("failed to register ns1: %v", err)
@@ -679,6 +694,7 @@ func TestGetVariableValueNotRegistered(t *testing.T) {
 	ctx := t.Context()
 	store := newTestStore(t)
 	server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 	if err := store.RegisterNamespace(ctx, &Namespace{Name: "ns1"}); err != nil {
 		t.Fatalf("failed to register ns1: %v", err)
@@ -719,6 +735,7 @@ func TestDeregisterConsumerSuccess(t *testing.T) {
 	ctx := t.Context()
 	store := newTestStore(t)
 	server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 	if err := store.RegisterNamespace(ctx, &Namespace{Name: "ns1"}); err != nil {
 		t.Fatalf("failed to register ns1: %v", err)
@@ -778,6 +795,7 @@ func TestDeleteVariableBlocked(t *testing.T) {
 	ctx := t.Context()
 	store := newTestStore(t)
 	server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 	if err := store.RegisterNamespace(ctx, &Namespace{Name: "ns1"}); err != nil {
 		t.Fatalf("failed to register ns1: %v", err)
@@ -845,6 +863,7 @@ func TestNamespacePolicyAndWebhook(t *testing.T) {
 	ctx := t.Context()
 	store := newTestStore(t)
 	server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 	// Register with policy and webhook
 	req := &pb.RegisterNamespaceRequest{
@@ -884,6 +903,7 @@ func TestSetNamespacePolicyAndAccessControl(t *testing.T) {
 	ctx := t.Context()
 	store := newTestStore(t)
 	server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 	// Register source and consumers
 	for _, ns := range []string{"source", "allowed-1", "allowed-2", "blocked"} {
@@ -973,6 +993,7 @@ func TestRetentionPolicyPruning(t *testing.T) {
 	store := newTestStore(t)
 	fakeClock := clockwork.NewFakeClock()
 	server := NewServerWithClock(store, fakeClock)
+	t.Cleanup(server.Stop)
 
 	// Register with min=2, age=10 days
 	err := store.RegisterNamespace(ctx, &Namespace{
@@ -1078,6 +1099,7 @@ func TestGetDependencyGraph(t *testing.T) {
 	ctx := t.Context()
 	store := newTestStore(t)
 	server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 	// Set up graph: A -> B -> C, D (isolated)
 	for _, ns := range []string{"A", "B", "C", "D"} {
@@ -1351,11 +1373,11 @@ func TestWebhookPropagation(t *testing.T) {
 	ctx := t.Context()
 	store := newTestStore(t)
 	server := NewServer(store)
+	t.Cleanup(server.Stop)
 
 	received := make(chan struct {
-		Consumer string
-		Source   string
-		Variable string
+		Consumer      string
+		ActuationUUID string
 	}, 10)
 
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1365,8 +1387,7 @@ func TestWebhookPropagation(t *testing.T) {
 		}
 		var payload struct {
 			ConsumerNamespace string `json:"consumer_namespace"`
-			SourceNamespace   string `json:"source_namespace"`
-			VariableName     string `json:"variable_name"`
+			ActuationUUID     string `json:"actuation_uuid"`
 		}
 		err := json.NewDecoder(r.Body).Decode(&payload)
 		if err != nil {
@@ -1375,13 +1396,11 @@ func TestWebhookPropagation(t *testing.T) {
 		}
 		t.Logf("Test server received webhook for consumer %q", payload.ConsumerNamespace)
 		received <- struct {
-			Consumer string
-			Source   string
-			Variable string
+			Consumer      string
+			ActuationUUID string
 		}{
-			Consumer: payload.ConsumerNamespace,
-			Source:   payload.SourceNamespace,
-			Variable: payload.VariableName,
+			Consumer:      payload.ConsumerNamespace,
+			ActuationUUID: payload.ActuationUUID,
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -1461,8 +1480,8 @@ func TestWebhookPropagation(t *testing.T) {
 	for i := 0; i < numExpected; i++ {
 		select {
 		case event := <-received:
-			if event.Source != "source-ns" || event.Variable != "var1" {
-				t.Errorf("unexpected event content: %+v", event)
+			if event.ActuationUUID == "" {
+				t.Errorf("expected actuation_uuid to be present in webhook payload")
 			}
 			if !expected[event.Consumer] {
 				t.Errorf("unexpected consumer triggered: %s", event.Consumer)
@@ -1501,6 +1520,7 @@ func TestAuditInterceptor(t *testing.T) {
 		grpc.UnaryInterceptor(AuditInterceptor(store, clock)),
 	)
 	server := NewServerWithClock(store, clock)
+	t.Cleanup(server.Stop)
 	pb.RegisterVarletServiceServer(grpcServer, server)
 
 	go func() {
@@ -1604,11 +1624,11 @@ func TestWebhookDelayPropagation(t *testing.T) {
 	store := newTestStore(t)
 	fakeClock := clockwork.NewFakeClock()
 	server := NewServerWithClock(store, fakeClock)
+	t.Cleanup(server.Stop)
 
 	received := make(chan struct {
-		Consumer string
-		Source   string
-		Variable string
+		Consumer      string
+		ActuationUUID string
 	}, 10)
 
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1618,21 +1638,18 @@ func TestWebhookDelayPropagation(t *testing.T) {
 		}
 		var payload struct {
 			ConsumerNamespace string `json:"consumer_namespace"`
-			SourceNamespace   string `json:"source_namespace"`
-			VariableName     string `json:"variable_name"`
+			ActuationUUID     string `json:"actuation_uuid"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		received <- struct {
-			Consumer string
-			Source   string
-			Variable string
+			Consumer      string
+			ActuationUUID string
 		}{
-			Consumer: payload.ConsumerNamespace,
-			Source:   payload.SourceNamespace,
-			Variable: payload.VariableName,
+			Consumer:      payload.ConsumerNamespace,
+			ActuationUUID: payload.ActuationUUID,
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -1707,7 +1724,7 @@ func TestWebhookDelayPropagation(t *testing.T) {
 
 	select {
 	case event := <-received:
-		if event.Consumer != "consumer-ns" || event.Source != "source-ns" || event.Variable != "var1" {
+		if event.Consumer != "consumer-ns" || event.ActuationUUID == "" {
 			t.Errorf("unexpected event content: %+v", event)
 		}
 	case <-time.After(2 * time.Second):
@@ -1721,5 +1738,195 @@ func TestWebhookDelayPropagation(t *testing.T) {
 	default:
 	}
 }
+
+func TestWebhookDeduplicationAndMaxChanges(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	fakeClock := clockwork.NewFakeClock()
+	server := NewServerWithClock(store, fakeClock)
+	t.Cleanup(server.Stop)
+
+	received := make(chan struct {
+		Consumer      string
+		ActuationUUID string
+	}, 10)
+
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			ConsumerNamespace string `json:"consumer_namespace"`
+			ActuationUUID     string `json:"actuation_uuid"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		received <- struct {
+			Consumer      string
+			ActuationUUID string
+		}{
+			Consumer:      payload.ConsumerNamespace,
+			ActuationUUID: payload.ActuationUUID,
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer testServer.Close()
+
+	// Register namespaces
+	if err := store.RegisterNamespace(ctx, &Namespace{Name: "source-a"}); err != nil {
+		t.Fatalf("failed to register source-a: %v", err)
+	}
+	if err := store.RegisterNamespace(ctx, &Namespace{Name: "source-b"}); err != nil {
+		t.Fatalf("failed to register source-b: %v", err)
+	}
+	if err := store.RegisterNamespace(ctx, &Namespace{
+		Name:              "consumer-ns",
+		RunWebhookURL:     testServer.URL,
+		DedupDelayMinutes: 5,
+		MaxDedupChanges:   2,
+	}); err != nil {
+		t.Fatalf("failed to register consumer-ns: %v", err)
+	}
+
+	// 1. PUT INITIAL VARIABLES
+	valInit, _ := structpb.NewValue("initial")
+	_, err := server.PutVariable(ctx, &pb.PutVariableRequest{
+		Namespace:     "source-a",
+		Name:          "var1",
+		Value:         valInit,
+		ActuationUuid: "INIT-A",
+	})
+	if err != nil {
+		t.Fatalf("failed to put initial var1: %v", err)
+	}
+	_, err = server.PutVariable(ctx, &pb.PutVariableRequest{
+		Namespace:     "source-b",
+		Name:          "var2",
+		Value:         valInit,
+		ActuationUuid: "INIT-B",
+	})
+	if err != nil {
+		t.Fatalf("failed to put initial var2: %v", err)
+	}
+
+	// Let debounce fire for initial variables
+	fakeClock.Advance(2 * time.Second)
+	time.Sleep(50 * time.Millisecond)
+
+	// Set policy
+	_, err = server.SetNamespacePolicy(ctx, &pb.SetNamespacePolicyRequest{
+		Namespace:        "source-a",
+		AllowedConsumers: []string{"consumer-ns"},
+	})
+	if err != nil {
+		t.Fatalf("failed to set policy on source-a: %v", err)
+	}
+	_, err = server.SetNamespacePolicy(ctx, &pb.SetNamespacePolicyRequest{
+		Namespace:        "source-b",
+		AllowedConsumers: []string{"consumer-ns"},
+	})
+	if err != nil {
+		t.Fatalf("failed to set policy on source-b: %v", err)
+	}
+
+	// Register consumers (now that variables exist and policy is set)
+	_, err = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+		ConsumerNamespace: "consumer-ns",
+		SourceNamespace:   "source-a",
+		VariableName:     "var1",
+	})
+	if err != nil {
+		t.Fatalf("failed to register consumer for var1: %v", err)
+	}
+	_, err = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+		ConsumerNamespace: "consumer-ns",
+		SourceNamespace:   "source-b",
+		VariableName:     "var2",
+	})
+	if err != nil {
+		t.Fatalf("failed to register consumer for var2: %v", err)
+	}
+
+	// Clean out any webhooks triggered during registration / initialization if any (should be none since consumers registered after initial puts)
+	select {
+	case event := <-received:
+		t.Fatalf("unexpected webhook during setup: %+v", event)
+	default:
+	}
+
+	// 2. First change from source-a (organic actuation UUID-A)
+	val1, _ := structpb.NewValue("val1")
+	_, err = server.PutVariable(ctx, &pb.PutVariableRequest{
+		Namespace:     "source-a",
+		Name:          "var1",
+		Value:         val1,
+		ActuationUuid: "UUID-A",
+	})
+	if err != nil {
+		t.Fatalf("failed to put variable 1: %v", err)
+	}
+
+	fakeClock.Advance(2 * time.Second) // Let source debounce fire and queue the webhook
+	time.Sleep(50 * time.Millisecond)  // Give goroutine time to run QueueWebhook
+
+	// Check that it is NOT fired immediately
+	select {
+	case event := <-received:
+		t.Fatalf("webhook fired prematurely: %+v", event)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// 3. Second change from source-b (organic actuation UUID-B)
+	val2, _ := structpb.NewValue("val2")
+	_, err = server.PutVariable(ctx, &pb.PutVariableRequest{
+		Namespace:     "source-b",
+		Name:          "var2",
+		Value:         val2,
+		ActuationUuid: "UUID-B",
+	})
+	if err != nil {
+		t.Fatalf("failed to put variable 2: %v", err)
+	}
+
+	fakeClock.Advance(2 * time.Second) // Let source debounce fire
+	time.Sleep(50 * time.Millisecond)  // Give goroutine time to update QueueWebhook and set fire_at to now
+
+	// Since max_dedup_changes is 2, it should have reached the cap and updated fire_at to now.
+	// We need to advance the fake clock slightly to let the background worker poll (which runs every 2 seconds).
+	fakeClock.Advance(2 * time.Second)
+	time.Sleep(50 * time.Millisecond)  // Give worker goroutine time to run processPendingWebhooks
+
+	// Now it should have fired!
+	var triggerUUID string
+	select {
+	case event := <-received:
+		if event.Consumer != "consumer-ns" {
+			t.Errorf("unexpected consumer: %s", event.Consumer)
+		}
+		triggerUUID = event.ActuationUUID
+		if triggerUUID == "" {
+			t.Errorf("expected actuation_uuid in webhook")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for webhook to fire after reaching max_dedup_changes")
+	}
+
+	// Verify lineage in DB
+	parents, err := store.GetActuationParents(ctx, triggerUUID)
+	if err != nil {
+		t.Fatalf("failed to get actuation parents: %v", err)
+	}
+
+	expectedParents := map[string]bool{"UUID-A": true, "UUID-B": true}
+	if len(parents) != 2 {
+		t.Errorf("expected 2 parents, got %v", parents)
+	}
+	for _, p := range parents {
+		if !expectedParents[p] {
+			t.Errorf("unexpected parent: %s", p)
+		}
+	}
+}
+
 
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	pb "github.com/google/varlet/proto/v1"
+	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -36,6 +37,11 @@ const (
 	StatusPotentiallyAffected NamespaceStatus = "potentially-affected"
 )
 
+type activeActuation struct {
+	uuid      string
+	startTime time.Time
+}
+
 type debounceState struct {
 	timer            interface{ Stop() bool }
 	changedVariables map[string]bool
@@ -48,21 +54,27 @@ type Server struct {
 	clock clockwork.Clock
 
 	mu             sync.Mutex
-	actuating      map[string]time.Time
+	actuating      map[string]*activeActuation
 	affected       map[string]bool
 	succeeded      map[string]bool
 	debounceTimers map[string]*debounceState
+	stopChan       chan struct{}
+	wg             sync.WaitGroup
 }
 
 func newServer(store Store, clock clockwork.Clock) *Server {
-	return &Server{
+	s := &Server{
 		store:          store,
 		clock:          clock,
-		actuating:      make(map[string]time.Time),
+		actuating:      make(map[string]*activeActuation),
 		affected:       make(map[string]bool),
 		succeeded:      make(map[string]bool),
 		debounceTimers: make(map[string]*debounceState),
+		stopChan:       make(chan struct{}),
 	}
+	s.wg.Add(1)
+	go s.webhookWorker()
+	return s
 }
 
 // NewServer creates a new Server with a real clock.
@@ -75,6 +87,12 @@ func NewServerWithClock(store Store, clock clockwork.Clock) *Server {
 	return newServer(store, clock)
 }
 
+// Stop stops the background workers.
+func (s *Server) Stop() {
+	close(s.stopChan)
+	s.wg.Wait()
+}
+
 // RegisterNamespace registers a new namespace.
 func (s *Server) RegisterNamespace(ctx context.Context, req *pb.RegisterNamespaceRequest) (*pb.RegisterNamespaceResponse, error) {
 	if req.GetName() == "" {
@@ -84,11 +102,19 @@ func (s *Server) RegisterNamespace(ctx context.Context, req *pb.RegisterNamespac
 	if req.GetWebhookDelayMinutes() < 0 {
 		return nil, status.Error(codes.InvalidArgument, "webhook delay minutes cannot be negative")
 	}
+	if req.GetDedupDelayMinutes() < 0 {
+		return nil, status.Error(codes.InvalidArgument, "dedup delay minutes cannot be negative")
+	}
+	if req.GetMaxDedupChanges() < 0 {
+		return nil, status.Error(codes.InvalidArgument, "max dedup changes cannot be negative")
+	}
 
 	ns := &Namespace{
 		Name:                req.GetName(),
 		RunWebhookURL:       req.GetRunWebhookUrl(),
 		WebhookDelayMinutes: req.GetWebhookDelayMinutes(),
+		DedupDelayMinutes:   req.GetDedupDelayMinutes(),
+		MaxDedupChanges:     req.GetMaxDedupChanges(),
 	}
 	if req.GetRetentionPolicy() != nil {
 		ns.RetentionPolicyMinVersions = req.GetRetentionPolicy().GetMinVersions()
@@ -99,7 +125,19 @@ func (s *Server) RegisterNamespace(ctx context.Context, req *pb.RegisterNamespac
 		return nil, status.Errorf(codes.Internal, "failed to register namespace: %v", err)
 	}
 
-	s.markActuating(ns.Name)
+	uuidStr := uuid.New().String()
+	s.markActuating(ns.Name, uuidStr)
+
+	act := &Actuation{
+		UUID:      uuidStr,
+		Namespace: ns.Name,
+		Source:    "organic",
+		Status:    "actuating",
+		CreatedAt: s.clock.Now(),
+	}
+	if err := s.store.CreateActuation(ctx, act, nil); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to record actuation: %v", err)
+	}
 
 	return &pb.RegisterNamespaceResponse{
 		Name: ns.Name,
@@ -112,7 +150,23 @@ func (s *Server) StartActuation(ctx context.Context, req *pb.StartActuationReque
 		return nil, status.Error(codes.InvalidArgument, "namespace cannot be empty")
 	}
 
-	s.markActuating(ns)
+	uuidStr := req.GetActuationUuid()
+	if uuidStr == "" {
+		uuidStr = uuid.New().String()
+	}
+
+	s.markActuating(ns, uuidStr)
+
+	act := &Actuation{
+		UUID:      uuidStr,
+		Namespace: ns,
+		Source:    "organic",
+		Status:    "actuating",
+		CreatedAt: s.clock.Now(),
+	}
+	if err := s.store.CreateActuation(ctx, act, req.GetParentActuationUuids()); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to record actuation: %v", err)
+	}
 
 	return &pb.StartActuationResponse{}, nil
 }
@@ -136,6 +190,8 @@ func (s *Server) GetNamespace(ctx context.Context, req *pb.GetNamespaceRequest) 
 		AllowedConsumers:    ns.AllowedConsumers,
 		RunWebhookUrl:       ns.RunWebhookURL,
 		WebhookDelayMinutes: ns.WebhookDelayMinutes,
+		DedupDelayMinutes:   ns.DedupDelayMinutes,
+		MaxDedupChanges:     ns.MaxDedupChanges,
 	}
 	if ns.RetentionPolicyMinVersions > 0 || ns.RetentionPolicyMaxAgeDays > 0 {
 		resp.RetentionPolicy = &pb.RetentionPolicy{
@@ -149,17 +205,19 @@ func (s *Server) GetNamespace(ctx context.Context, req *pb.GetNamespaceRequest) 
 
 // PutVariable stores a new variable version.
 func (s *Server) PutVariable(ctx context.Context, req *pb.PutVariableRequest) (*pb.PutVariableResponse, error) {
-	if req.GetNamespace() == "" {
+	nsName := req.GetNamespace()
+	varName := req.GetName()
+	if nsName == "" {
 		return nil, status.Error(codes.InvalidArgument, "namespace cannot be empty")
 	}
-	if req.GetName() == "" {
+	if varName == "" {
 		return nil, status.Error(codes.InvalidArgument, "name cannot be empty")
 	}
 	if req.GetValue() == nil {
 		return nil, status.Error(codes.InvalidArgument, "value cannot be nil")
 	}
 
-	latest, err := s.store.GetLatestVariable(ctx, req.GetNamespace(), req.GetName())
+	latest, err := s.store.GetLatestVariable(ctx, nsName, varName)
 	isNotFound := errors.Is(err, ErrNotFound)
 	if err != nil && !isNotFound {
 		return nil, status.Errorf(codes.Internal, "failed to get latest variable: %v", err)
@@ -187,13 +245,24 @@ func (s *Server) PutVariable(ctx context.Context, req *pb.PutVariableRequest) (*
 		}
 	}
 
+	// Get actuation UUID
+	actUUID := req.GetActuationUuid()
+	if actUUID == "" {
+		s.mu.Lock()
+		if active, ok := s.actuating[nsName]; ok {
+			actUUID = active.uuid
+		}
+		s.mu.Unlock()
+	}
+
 	if shouldWrite {
 		v := &Variable{
-			Namespace: req.GetNamespace(),
-			Name:      req.GetName(),
-			Version:   version,
-			Value:     newValueBytes,
-			CreatedAt: s.clock.Now(),
+			Namespace:     nsName,
+			Name:          varName,
+			Version:       version,
+			Value:         newValueBytes,
+			CreatedAt:     s.clock.Now(),
+			ActuationUUID: actUUID,
 		}
 		if err := s.store.PutVariable(ctx, v); err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to store variable: %v", err)
@@ -202,7 +271,7 @@ func (s *Server) PutVariable(ctx context.Context, req *pb.PutVariableRequest) (*
 		s.debounceSucceeded(v.Namespace, v.Name, true)
 
 		// Enforce retention policy
-		ns, err := s.store.GetNamespace(ctx, req.GetNamespace())
+		ns, err := s.store.GetNamespace(ctx, nsName)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to get namespace for retention check: %v", err)
 		}
@@ -214,7 +283,7 @@ func (s *Server) PutVariable(ctx context.Context, req *pb.PutVariableRequest) (*
 			}
 		}
 	} else {
-		s.debounceSucceeded(req.GetNamespace(), "", false)
+		s.debounceSucceeded(nsName, "", false)
 	}
 
 	return &pb.PutVariableResponse{}, nil
@@ -599,6 +668,14 @@ func (s *Server) propagateChange(ctx context.Context, sourceNS, varName string) 
 		return
 	}
 
+	// Retrieve the latest variable version to find the parent actuation UUID
+	latest, err := s.store.GetLatestVariable(ctx, sourceNS, varName)
+	if err != nil {
+		log.Printf("[ERROR] failed to get latest variable %s/%s to find parent actuation: %v", sourceNS, varName, err)
+		return
+	}
+	parentUUID := latest.ActuationUUID
+
 	for _, consumerNS := range consumers {
 		ns, err := s.store.GetNamespace(ctx, consumerNS)
 		if err != nil {
@@ -609,22 +686,95 @@ func (s *Server) propagateChange(ctx context.Context, sourceNS, varName string) 
 			continue
 		}
 
-		go s.callWebhook(ctx, ns.RunWebhookURL, consumerNS, sourceNS, varName, ns.WebhookDelayMinutes)
+		// Queue the webhook with sliding window and max change count rules
+		triggerUUID := uuid.New().String()
+		now := s.clock.Now()
+		err = s.store.QueueWebhook(ctx, consumerNS, ns.WebhookDelayMinutes, ns.DedupDelayMinutes, triggerUUID, parentUUID, now)
+		if err != nil {
+			log.Printf("[ERROR] failed to queue webhook for %s: %v", consumerNS, err)
+		}
 	}
 }
 
-func (s *Server) callWebhook(ctx context.Context, url, consumerNS, sourceNS, varName string, delay int32) {
-	if delay > 0 {
-		s.clock.Sleep(time.Duration(delay) * time.Minute)
+func (s *Server) webhookWorker() {
+	defer s.wg.Done()
+	ticker := s.clock.NewTicker(2 * time.Second) // poll queue every 2 seconds
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.stopChan:
+			return
+		case <-ticker.Chan():
+			s.processPendingWebhooks(context.Background())
+		}
 	}
+}
+
+func (s *Server) processPendingWebhooks(ctx context.Context) {
+	now := s.clock.Now()
+	infos, err := s.store.GetPendingWebhooksToFire(ctx, now)
+	if err != nil {
+		log.Printf("[ERROR] failed to get pending webhooks: %v", err)
+		return
+	}
+
+	for _, info := range infos {
+		parents, err := s.store.GetPendingWebhookParents(ctx, info.TriggerUUID)
+		if err != nil {
+			log.Printf("[ERROR] failed to get parents for trigger %s: %v", info.TriggerUUID, err)
+			continue
+		}
+
+		ns, err := s.store.GetNamespace(ctx, info.ConsumerNamespace)
+		if err != nil {
+			log.Printf("[ERROR] failed to get namespace %s for webhook: %v", info.ConsumerNamespace, err)
+			continue
+		}
+
+		if ns.RunWebhookURL == "" {
+			s.promoteTriggerToActuation(ctx, info.TriggerUUID, info.ConsumerNamespace, parents)
+			_ = s.store.RemovePendingWebhook(ctx, info.ConsumerNamespace)
+			continue
+		}
+
+		s.promoteTriggerToActuation(ctx, info.TriggerUUID, info.ConsumerNamespace, parents)
+
+		if err := s.store.RemovePendingWebhook(ctx, info.ConsumerNamespace); err != nil {
+			log.Printf("[ERROR] failed to remove pending webhook for %s: %v", info.ConsumerNamespace, err)
+			continue
+		}
+
+		auditDetails, _ := json.Marshal(map[string]any{
+			"trigger_uuid": info.TriggerUUID,
+			"parent_uuids": parents,
+		})
+		s.writeAudit(ctx, "WebhookTriggered", info.ConsumerNamespace, string(auditDetails))
+
+		go s.sendWebhook(ctx, ns.RunWebhookURL, info.ConsumerNamespace, info.TriggerUUID)
+	}
+}
+
+func (s *Server) promoteTriggerToActuation(ctx context.Context, triggerUUID, namespace string, parents []string) {
+	act := &Actuation{
+		UUID:      triggerUUID,
+		Namespace: namespace,
+		Source:    "webhook",
+		Status:    "triggered",
+		CreatedAt: s.clock.Now(),
+	}
+	if err := s.store.CreateActuation(ctx, act, parents); err != nil {
+		log.Printf("[ERROR] failed to promote trigger to actuation: %v", err)
+	}
+}
+
+func (s *Server) sendWebhook(ctx context.Context, url, consumerNS, triggerUUID string) {
 	payload := struct {
 		ConsumerNamespace string `json:"consumer_namespace"`
-		SourceNamespace   string `json:"source_namespace"`
-		VariableName     string `json:"variable_name"`
+		ActuationUUID     string `json:"actuation_uuid"`
 	}{
 		ConsumerNamespace: consumerNS,
-		SourceNamespace:   sourceNS,
-		VariableName:     varName,
+		ActuationUUID:     triggerUUID,
 	}
 
 	body, err := json.Marshal(payload)
@@ -649,6 +799,25 @@ func (s *Server) callWebhook(ctx context.Context, url, consumerNS, sourceNS, var
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		log.Printf("[WARNING] webhook call to %s returned status %d", url, resp.StatusCode)
+	}
+}
+
+func (s *Server) writeAudit(ctx context.Context, action, target, details string) {
+	actor := "system"
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		if actors := md.Get("x-actor"); len(actors) > 0 {
+			actor = actors[0]
+		}
+	}
+	auditLog := &AuditLog{
+		Timestamp: s.clock.Now(),
+		Actor:     actor,
+		Action:    action,
+		Target:    target,
+		Details:   details,
+	}
+	if err := s.store.WriteAuditLog(ctx, auditLog); err != nil {
+		log.Printf("[ERROR] failed to write audit log: %v", err)
 	}
 }
 
@@ -732,10 +901,13 @@ func AuditInterceptor(store Store, clock clockwork.Clock) grpc.UnaryServerInterc
 	}
 }
 
-func (s *Server) markActuating(ns string) {
+func (s *Server) markActuating(ns string, uuid string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.actuating[ns] = s.clock.Now()
+	s.actuating[ns] = &activeActuation{
+		uuid:      uuid,
+		startTime: s.clock.Now(),
+	}
 	delete(s.affected, ns)
 	delete(s.succeeded, ns)
 }
@@ -760,7 +932,12 @@ func (s *Server) debounceSucceeded(ns string, varName string, changed bool) {
 
 	timer := s.clock.AfterFunc(2*time.Second, func() {
 		s.mu.Lock()
-		delete(s.actuating, ns)
+		active, ok := s.actuating[ns]
+		var actUUID string
+		if ok {
+			actUUID = active.uuid
+			delete(s.actuating, ns)
+		}
 		s.succeeded[ns] = true
 		
 		varsToPropagate := make([]string, 0, len(state.changedVariables))
@@ -770,6 +947,12 @@ func (s *Server) debounceSucceeded(ns string, varName string, changed bool) {
 		
 		delete(s.debounceTimers, ns)
 		s.mu.Unlock()
+
+		if actUUID != "" {
+			if err := s.store.UpdateActuationStatus(context.Background(), actUUID, "completed"); err != nil {
+				log.Printf("[WARNING] failed to update actuation %s status to completed: %v", actUUID, err)
+			}
+		}
 
 		if len(varsToPropagate) > 0 {
 			if err := s.propagateAffected(context.Background(), ns); err != nil {
@@ -840,7 +1023,7 @@ func (s *Server) handleTimeouts(ctx context.Context) {
 	s.mu.Lock()
 	candidates := make(map[string]time.Time)
 	for k, v := range s.actuating {
-		candidates[k] = v
+		candidates[k] = v.startTime
 	}
 	s.mu.Unlock()
 
@@ -895,7 +1078,7 @@ func (s *Server) calculateStatuses(ctx context.Context, namespaces []string) (ma
 	s.mu.Lock()
 	actuatingCopy := make(map[string]time.Time)
 	for k, v := range s.actuating {
-		actuatingCopy[k] = v
+		actuatingCopy[k] = v.startTime
 	}
 	affectedCopy := make(map[string]bool)
 	for k, v := range s.affected {

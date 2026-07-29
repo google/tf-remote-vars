@@ -28,6 +28,7 @@ func NewOutputResource() resource.Resource {
 type OutputResource struct {
 	client           pb.VarletServiceClient
 	defaultNamespace string
+	actuationUUID    string
 }
 
 // OutputResourceModel describes the resource data model.
@@ -100,6 +101,7 @@ func (r *OutputResource) Configure(ctx context.Context, req resource.ConfigureRe
 
 	r.client = data.Client
 	r.defaultNamespace = data.Namespace
+	r.actuationUUID = data.ActuationUUID
 }
 
 func (r *OutputResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -180,6 +182,7 @@ func (r *OutputResource) putVariable(ctx context.Context, ns, name string, value
 		Name:           name,
 		Value:          pbVal,
 		ForceActuation: force,
+		ActuationUuid:  r.actuationUUID,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to store variable: %w", err)
@@ -198,8 +201,9 @@ func (r *OutputResource) Delete(ctx context.Context, req resource.DeleteRequest,
 
 	// Call backend
 	_, err := r.client.DeleteVariable(ctx, &pb.DeleteVariableRequest{
-		Namespace: data.Namespace.ValueString(),
-		Name:      data.Name.ValueString(),
+		Namespace:     data.Namespace.ValueString(),
+		Name:          data.Name.ValueString(),
+		ActuationUuid: r.actuationUUID,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError(

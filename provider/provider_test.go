@@ -610,3 +610,76 @@ resource "varlet_output" "out" {
 		},
 	})
 }
+
+func TestAccActuationLineagePropagation(t *testing.T) {
+	ctx := t.Context()
+	addr, store := startTestServer(t)
+
+	// Set env vars
+	t.Setenv("VARLET_ACTUATION_UUID", "custom-actuation-123")
+	t.Setenv("VARLET_UPSTREAM_ACTUATION_UUIDS", "parent-999, parent-888")
+
+	err := store.RegisterNamespace(ctx, &backend.Namespace{Name: "test-ns"})
+	if err != nil {
+		t.Fatalf("failed to pre-register namespace: %v", err)
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+provider "varlet" {
+  endpoint  = %q
+  namespace = "test-ns"
+}
+
+resource "varlet_output" "str" {
+  name  = "my_str"
+  value = "hello"
+}
+`, addr),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("varlet_output.str", "value", "hello"),
+					func(s *terraform.State) error {
+						// 1. Verify variable in DB contains the ActuationUUID
+						v, err := store.GetLatestVariable(ctx, "test-ns", "my_str")
+						if err != nil {
+							return fmt.Errorf("failed to get variable from DB: %w", err)
+						}
+						if v.ActuationUUID != "custom-actuation-123" {
+							return fmt.Errorf("expected variable actuation UUID to be 'custom-actuation-123', got %q", v.ActuationUUID)
+						}
+
+						// 2. Verify Actuation was created in DB with correct status
+						act, err := store.GetActuation(ctx, "custom-actuation-123")
+						if err != nil {
+							return fmt.Errorf("failed to get actuation: %w", err)
+						}
+						if act.Namespace != "test-ns" {
+							return fmt.Errorf("expected actuation namespace 'test-ns', got %q", act.Namespace)
+						}
+
+						// 3. Verify parent lineage was recorded in DB
+						parents, err := store.GetActuationParents(ctx, "custom-actuation-123")
+						if err != nil {
+							return fmt.Errorf("failed to get actuation parents: %w", err)
+						}
+
+						expected := map[string]bool{"parent-999": true, "parent-888": true}
+						if len(parents) != 2 {
+							return fmt.Errorf("expected 2 parents, got %v", parents)
+						}
+						for _, p := range parents {
+							if !expected[p] {
+								return fmt.Errorf("unexpected parent actuation recorded: %q", p)
+							}
+						}
+
+						return nil
+					},
+				),
+			},
+		},
+	})
+}

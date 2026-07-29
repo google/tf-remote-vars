@@ -20,16 +20,35 @@ type Namespace struct {
 	RetentionPolicyMinVersions int32
 	RetentionPolicyMaxAgeDays  int32
 	WebhookDelayMinutes        int32
+	DedupDelayMinutes          int32
+	MaxDedupChanges            int32
 	AllowedConsumers           []string
 }
 
 // Variable represents a variable version in Varlet.
 type Variable struct {
+	Namespace     string
+	Name          string
+	Version       int64
+	Value         []byte // Serialized google.protobuf.Value (JSON)
+	CreatedAt     time.Time
+	ActuationUUID string
+}
+
+// Actuation represents an actuation run.
+type Actuation struct {
+	UUID      string
 	Namespace string
-	Name      string
-	Version   int64
-	Value     []byte // Serialized google.protobuf.Value (JSON)
+	Source    string // "organic" or "webhook"
+	Status    string // "triggered", "actuating", "completed", "failed"
 	CreatedAt time.Time
+}
+
+// PendingWebhookInfo represents a queued webhook.
+type PendingWebhookInfo struct {
+	ConsumerNamespace string
+	TriggerUUID       string
+	FireAt            time.Time
 }
 
 // Dependency represents a dependency edge in Varlet.
@@ -75,6 +94,18 @@ type Store interface {
 	WriteAuditLog(ctx context.Context, log *AuditLog) error
 	GetAuditLogs(ctx context.Context) ([]*AuditLog, error)
 
+	// Webhook Queue
+	QueueWebhook(ctx context.Context, consumerNS string, webhookDelay, dedupDelay int32, triggerUUID string, parentUUID string, now time.Time) error
+	GetPendingWebhooksToFire(ctx context.Context, now time.Time) ([]*PendingWebhookInfo, error)
+	GetPendingWebhookParents(ctx context.Context, triggerUUID string) ([]string, error)
+	RemovePendingWebhook(ctx context.Context, consumerNS string) error
+
+	// Actuations
+	CreateActuation(ctx context.Context, act *Actuation, parentUUIDs []string) error
+	UpdateActuationStatus(ctx context.Context, uuid string, status string) error
+	GetActuation(ctx context.Context, uuid string) (*Actuation, error)
+	GetActuationParents(ctx context.Context, uuid string) ([]string, error)
+
 	Close() error
 }
 
@@ -111,7 +142,9 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		run_webhook_url TEXT,
 		retention_policy_min_versions INTEGER,
 		retention_policy_max_age_days INTEGER,
-		webhook_delay_minutes INTEGER DEFAULT 0
+		webhook_delay_minutes INTEGER DEFAULT 0,
+		dedup_delay_minutes INTEGER DEFAULT 0,
+		max_dedup_changes INTEGER DEFAULT 0
 	);
 	CREATE TABLE IF NOT EXISTS namespace_policies (
 		namespace TEXT,
@@ -125,6 +158,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		version INTEGER,
 		value BLOB,
 		created_at DATETIME,
+		actuation_uuid TEXT,
 		PRIMARY KEY (namespace, name, version),
 		FOREIGN KEY (namespace) REFERENCES namespaces(name) ON DELETE CASCADE
 	);
@@ -143,25 +177,58 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		action TEXT,
 		target TEXT,
 		details TEXT
+	);
+	CREATE TABLE IF NOT EXISTS pending_webhooks (
+		consumer_namespace TEXT PRIMARY KEY,
+		fire_at DATETIME NOT NULL,
+		trigger_uuid TEXT NOT NULL,
+		FOREIGN KEY (consumer_namespace) REFERENCES namespaces(name) ON DELETE CASCADE
+	);
+	CREATE TABLE IF NOT EXISTS pending_webhook_parents (
+		trigger_uuid TEXT NOT NULL,
+		parent_actuation_uuid TEXT NOT NULL,
+		PRIMARY KEY (trigger_uuid, parent_actuation_uuid)
+	);
+	CREATE TABLE IF NOT EXISTS actuations (
+		uuid TEXT PRIMARY KEY,
+		namespace TEXT NOT NULL,
+		source TEXT NOT NULL,
+		status TEXT NOT NULL,
+		created_at DATETIME NOT NULL,
+		FOREIGN KEY (namespace) REFERENCES namespaces(name) ON DELETE CASCADE
+	);
+	CREATE TABLE IF NOT EXISTS actuation_lineage (
+		actuation_uuid TEXT NOT NULL,
+		parent_actuation_uuid TEXT NOT NULL,
+		PRIMARY KEY (actuation_uuid, parent_actuation_uuid),
+		FOREIGN KEY (actuation_uuid) REFERENCES actuations(uuid) ON DELETE CASCADE,
+		FOREIGN KEY (parent_actuation_uuid) REFERENCES actuations(uuid) ON DELETE CASCADE
 	);`
 	if _, err := db.Exec(query); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create tables: %w", err)
 	}
 
+	// Add missing columns if they don't exist in existing DB
+	_, _ = db.Exec("ALTER TABLE namespaces ADD COLUMN dedup_delay_minutes INTEGER DEFAULT 0;")
+	_, _ = db.Exec("ALTER TABLE namespaces ADD COLUMN max_dedup_changes INTEGER DEFAULT 0;")
+	_, _ = db.Exec("ALTER TABLE variables ADD COLUMN actuation_uuid TEXT;")
+
 	return &SQLiteStore{db: db}, nil
 }
 
 // RegisterNamespace registers a new namespace.
 func (s *SQLiteStore) RegisterNamespace(ctx context.Context, ns *Namespace) error {
-	query := `INSERT INTO namespaces (name, run_webhook_url, retention_policy_min_versions, retention_policy_max_age_days, webhook_delay_minutes) 
-              VALUES (?, ?, ?, ?, ?)
+	query := `INSERT INTO namespaces (name, run_webhook_url, retention_policy_min_versions, retention_policy_max_age_days, webhook_delay_minutes, dedup_delay_minutes, max_dedup_changes) 
+              VALUES (?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(name) DO UPDATE SET
                   run_webhook_url = excluded.run_webhook_url,
                   retention_policy_min_versions = excluded.retention_policy_min_versions,
                   retention_policy_max_age_days = excluded.retention_policy_max_age_days,
-                  webhook_delay_minutes = excluded.webhook_delay_minutes`
-	_, err := s.db.ExecContext(ctx, query, ns.Name, ns.RunWebhookURL, ns.RetentionPolicyMinVersions, ns.RetentionPolicyMaxAgeDays, ns.WebhookDelayMinutes)
+                  webhook_delay_minutes = excluded.webhook_delay_minutes,
+                  dedup_delay_minutes = excluded.dedup_delay_minutes,
+                  max_dedup_changes = excluded.max_dedup_changes`
+	_, err := s.db.ExecContext(ctx, query, ns.Name, ns.RunWebhookURL, ns.RetentionPolicyMinVersions, ns.RetentionPolicyMaxAgeDays, ns.WebhookDelayMinutes, ns.DedupDelayMinutes, ns.MaxDedupChanges)
 	if err != nil {
 		return fmt.Errorf("failed to register namespace: %w", err)
 	}
@@ -170,9 +237,9 @@ func (s *SQLiteStore) RegisterNamespace(ctx context.Context, ns *Namespace) erro
 
 // GetNamespace retrieves a namespace by name.
 func (s *SQLiteStore) GetNamespace(ctx context.Context, name string) (*Namespace, error) {
-	row := s.db.QueryRowContext(ctx, "SELECT name, run_webhook_url, retention_policy_min_versions, retention_policy_max_age_days, webhook_delay_minutes FROM namespaces WHERE name = ?", name)
+	row := s.db.QueryRowContext(ctx, "SELECT name, run_webhook_url, retention_policy_min_versions, retention_policy_max_age_days, webhook_delay_minutes, dedup_delay_minutes, max_dedup_changes FROM namespaces WHERE name = ?", name)
 	var ns Namespace
-	err := row.Scan(&ns.Name, &ns.RunWebhookURL, &ns.RetentionPolicyMinVersions, &ns.RetentionPolicyMaxAgeDays, &ns.WebhookDelayMinutes)
+	err := row.Scan(&ns.Name, &ns.RunWebhookURL, &ns.RetentionPolicyMinVersions, &ns.RetentionPolicyMaxAgeDays, &ns.WebhookDelayMinutes, &ns.DedupDelayMinutes, &ns.MaxDedupChanges)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -203,22 +270,45 @@ func (s *SQLiteStore) GetNamespace(ctx context.Context, name string) (*Namespace
 
 // PutVariable stores a new variable version.
 func (s *SQLiteStore) PutVariable(ctx context.Context, v *Variable) error {
-	query := `INSERT INTO variables (namespace, name, version, value, created_at) VALUES (?, ?, ?, ?, ?)`
-	_, err := s.db.ExecContext(ctx, query, v.Namespace, v.Name, v.Version, v.Value, v.CreatedAt)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	query := `INSERT INTO variables (namespace, name, version, value, created_at, actuation_uuid) VALUES (?, ?, ?, ?, ?, ?)`
+	var actUUID any = nil
+	if v.ActuationUUID != "" {
+		actUUID = v.ActuationUUID
+		// Ensure parent/active actuation is recorded in the database
+		_, err = tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO actuations (uuid, namespace, source, status, created_at) 
+			VALUES (?, ?, 'organic', 'completed', ?)`, v.ActuationUUID, v.Namespace, v.CreatedAt)
+		if err != nil {
+			return fmt.Errorf("failed to ensure actuation exists for variable: %w", err)
+		}
+	}
+	_, err = tx.ExecContext(ctx, query, v.Namespace, v.Name, v.Version, v.Value, v.CreatedAt, actUUID)
 	if err != nil {
 		return fmt.Errorf("failed to put variable: %w", err)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // GetLatestVariable retrieves the latest version of a variable.
 func (s *SQLiteStore) GetLatestVariable(ctx context.Context, namespace, name string) (*Variable, error) {
-	query := `SELECT namespace, name, version, value, created_at FROM variables 
+	query := `SELECT namespace, name, version, value, created_at, actuation_uuid FROM variables 
               WHERE namespace = ? AND name = ? 
               ORDER BY version DESC LIMIT 1`
 	row := s.db.QueryRowContext(ctx, query, namespace, name)
 	var v Variable
-	err := row.Scan(&v.Namespace, &v.Name, &v.Version, &v.Value, &v.CreatedAt)
+	var actUUID sql.NullString
+	err := row.Scan(&v.Namespace, &v.Name, &v.Version, &v.Value, &v.CreatedAt, &actUUID)
+	if err == nil {
+		if actUUID.Valid {
+			v.ActuationUUID = actUUID.String
+		}
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -427,6 +517,209 @@ func (s *SQLiteStore) GetConsumers(ctx context.Context, sourceNS, varName string
 		return nil, fmt.Errorf("rows error: %w", err)
 	}
 	return consumers, nil
+}
+
+func (s *SQLiteStore) QueueWebhook(ctx context.Context, consumerNS string, webhookDelay, dedupDelay int32, triggerUUID string, parentUUID string, now time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Check if already queued
+	var existingUUID string
+	var existingFireAt time.Time
+	row := tx.QueryRowContext(ctx, "SELECT trigger_uuid, fire_at FROM pending_webhooks WHERE consumer_namespace = ?", consumerNS)
+	err = row.Scan(&existingUUID, &existingFireAt)
+	isNotFound := errors.Is(err, sql.ErrNoRows)
+	if err != nil && !isNotFound {
+		return fmt.Errorf("failed to check pending webhook: %w", err)
+	}
+
+	activeUUID := triggerUUID
+	var calculatedFireAt time.Time
+	if isNotFound {
+		// First change
+		delay := webhookDelay
+		if dedupDelay > delay {
+			delay = dedupDelay
+		}
+		calculatedFireAt = now.Add(time.Duration(delay) * time.Minute)
+
+		_, err = tx.ExecContext(ctx, "INSERT INTO pending_webhooks (consumer_namespace, fire_at, trigger_uuid) VALUES (?, ?, ?)", consumerNS, calculatedFireAt, triggerUUID)
+		if err != nil {
+			return fmt.Errorf("failed to insert pending webhook: %w", err)
+		}
+	} else {
+		// Subsequent change - sliding window
+		activeUUID = existingUUID
+		calculatedFireAt = now.Add(time.Duration(dedupDelay) * time.Minute)
+		if calculatedFireAt.After(existingFireAt) {
+			_, err = tx.ExecContext(ctx, "UPDATE pending_webhooks SET fire_at = ? WHERE consumer_namespace = ?", calculatedFireAt, consumerNS)
+			if err != nil {
+				return fmt.Errorf("failed to update pending webhook fire_at: %w", err)
+			}
+		} else {
+			calculatedFireAt = existingFireAt
+		}
+	}
+
+	// Insert parent association if parentUUID is provided
+	if parentUUID != "" {
+		_, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO pending_webhook_parents (trigger_uuid, parent_actuation_uuid) VALUES (?, ?)", activeUUID, parentUUID)
+		if err != nil {
+			return fmt.Errorf("failed to insert pending webhook parent: %w", err)
+		}
+	}
+
+	// Check max_dedup_changes
+	var maxChanges int32
+	err = tx.QueryRowContext(ctx, "SELECT max_dedup_changes FROM namespaces WHERE name = ?", consumerNS).Scan(&maxChanges)
+	if err == nil && maxChanges > 0 {
+		var parentCount int
+		err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM pending_webhook_parents WHERE trigger_uuid = ?", activeUUID).Scan(&parentCount)
+		if err == nil && parentCount >= int(maxChanges) {
+			// Force immediate fire by setting fire_at to now
+			_, err = tx.ExecContext(ctx, "UPDATE pending_webhooks SET fire_at = ? WHERE consumer_namespace = ?", now, consumerNS)
+			if err != nil {
+				return fmt.Errorf("failed to force fire pending webhook: %w", err)
+			}
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *SQLiteStore) GetPendingWebhooksToFire(ctx context.Context, now time.Time) ([]*PendingWebhookInfo, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT consumer_namespace, trigger_uuid, fire_at FROM pending_webhooks WHERE fire_at <= ?", now)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pending webhooks: %w", err)
+	}
+	defer rows.Close()
+
+	var infos []*PendingWebhookInfo
+	for rows.Next() {
+		var info PendingWebhookInfo
+		if err := rows.Scan(&info.ConsumerNamespace, &info.TriggerUUID, &info.FireAt); err != nil {
+			return nil, fmt.Errorf("failed to scan pending webhook: %w", err)
+		}
+		infos = append(infos, &info)
+	}
+	return infos, nil
+}
+
+func (s *SQLiteStore) GetPendingWebhookParents(ctx context.Context, triggerUUID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT parent_actuation_uuid FROM pending_webhook_parents WHERE trigger_uuid = ?", triggerUUID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pending webhook parents: %w", err)
+	}
+	defer rows.Close()
+
+	var parents []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("failed to scan pending webhook parent: %w", err)
+		}
+		parents = append(parents, p)
+	}
+	return parents, nil
+}
+
+func (s *SQLiteStore) RemovePendingWebhook(ctx context.Context, consumerNS string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Get trigger UUID first
+	var triggerUUID string
+	err = tx.QueryRowContext(ctx, "SELECT trigger_uuid FROM pending_webhooks WHERE consumer_namespace = ?", consumerNS).Scan(&triggerUUID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil // Already removed or not exists
+		}
+		return fmt.Errorf("failed to get trigger uuid: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, "DELETE FROM pending_webhooks WHERE consumer_namespace = ?", consumerNS)
+	if err != nil {
+		return fmt.Errorf("failed to delete pending webhook: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx, "DELETE FROM pending_webhook_parents WHERE trigger_uuid = ?", triggerUUID)
+	if err != nil {
+		return fmt.Errorf("failed to delete pending webhook parents: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func (s *SQLiteStore) CreateActuation(ctx context.Context, act *Actuation, parentUUIDs []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Use INSERT OR IGNORE in case it was pre-created during webhook triggering
+	query := `INSERT INTO actuations (uuid, namespace, source, status, created_at) 
+              VALUES (?, ?, ?, ?, ?)
+              ON CONFLICT(uuid) DO UPDATE SET 
+                  status = excluded.status`
+	_, err = tx.ExecContext(ctx, query, act.UUID, act.Namespace, act.Source, act.Status, act.CreatedAt)
+	if err != nil {
+		return fmt.Errorf("failed to insert/update actuation: %w", err)
+	}
+
+	for _, p := range parentUUIDs {
+		_, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO actuation_lineage (actuation_uuid, parent_actuation_uuid) VALUES (?, ?)", act.UUID, p)
+		if err != nil {
+			return fmt.Errorf("failed to insert actuation lineage: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *SQLiteStore) UpdateActuationStatus(ctx context.Context, uuid string, status string) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE actuations SET status = ? WHERE uuid = ?", status, uuid)
+	if err != nil {
+		return fmt.Errorf("failed to update actuation status: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetActuation(ctx context.Context, uuid string) (*Actuation, error) {
+	row := s.db.QueryRowContext(ctx, "SELECT uuid, namespace, source, status, created_at FROM actuations WHERE uuid = ?", uuid)
+	var act Actuation
+	err := row.Scan(&act.UUID, &act.Namespace, &act.Source, &act.Status, &act.CreatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get actuation: %w", err)
+	}
+	return &act, nil
+}
+
+func (s *SQLiteStore) GetActuationParents(ctx context.Context, uuid string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT parent_actuation_uuid FROM actuation_lineage WHERE actuation_uuid = ?", uuid)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query actuation parents: %w", err)
+	}
+	defer rows.Close()
+
+	var parents []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("failed to scan parent UUID: %w", err)
+		}
+		parents = append(parents, p)
+	}
+	return parents, nil
 }
 
 // WriteAuditLog writes an audit log entry.

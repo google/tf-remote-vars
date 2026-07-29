@@ -38,6 +38,8 @@ message RegisterNamespaceRequest {
   RetentionPolicy retention_policy = 2;
   string run_webhook_url = 3;
   int32 webhook_delay_minutes = 4;
+  int32 dedup_delay_minutes = 5;
+  int32 max_dedup_changes = 6;
 }
 
 message RegisterNamespaceResponse {
@@ -54,6 +56,8 @@ message GetNamespaceResponse {
   RetentionPolicy retention_policy = 3;
   string run_webhook_url = 4;
   int32 webhook_delay_minutes = 5;
+  int32 dedup_delay_minutes = 6;
+  int32 max_dedup_changes = 7;
 }
 
 message PutVariableRequest {
@@ -61,6 +65,7 @@ message PutVariableRequest {
   string name = 2;
   google.protobuf.Value value = 3;
   bool force_actuation = 4; // If true, force consumers to re-apply even if value is unchanged
+  string actuation_uuid = 5;
 }
 
 message PutVariableResponse {
@@ -71,6 +76,7 @@ message DeleteVariableRequest {
   string namespace = 1;
   string name = 2;
   bool force = 3; // If true, force deletion even if there are active consumers.
+  string actuation_uuid = 4;
 }
 
 message DeleteVariableResponse {
@@ -137,6 +143,8 @@ message GetDependencyGraphResponse {
 
 message StartActuationRequest {
   string namespace = 1;
+  string actuation_uuid = 2;
+  repeated string parent_actuation_uuids = 3;
 }
 
 message StartActuationResponse {}
