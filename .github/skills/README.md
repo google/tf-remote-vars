@@ -12,7 +12,7 @@ Below the source for the skills *hard-coded* here:
 [Matt Pocock's flow](./mattpocock/docs/engineering/grill-with-docs.md):
 
 ```txt
-/grill-with-docs → /to-spec and store into docs/specs → /to-tickets and store into docs/issues → /implement from docs/issues → /code-review
+/grill-with-docs and store under docs/adr → /to-spec and store into docs/specs → /to-tickets and store into docs/issues → /implement from docs/issues → /code-review
 ```
 
 [ponytail](./ponytail/ponytail-help/SKILL.md)
