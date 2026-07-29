@@ -26,6 +26,7 @@ service VarletService {
 
   // Graph operations
   rpc GetDependencyGraph(GetDependencyGraphRequest) returns (GetDependencyGraphResponse);
+  rpc GetActuationTrace(GetActuationTraceRequest) returns (GetActuationTraceResponse);
 }
 
 message RetentionPolicy {
@@ -138,7 +139,37 @@ message DependencyEdge {
 message GetDependencyGraphResponse {
   repeated string namespaces = 1;
   repeated DependencyEdge edges = 2;
-  map<string, string> statuses = 3; // namespace name -> status string
+  map<string, NamespaceStatusInfo> statuses = 3;
+}
+
+message NamespaceStatusInfo {
+  string status = 1;
+  repeated string causal_actuation_uuids = 2;
+  string active_actuation_uuid = 3;
+  string last_actuation_uuid = 4;
+}
+
+message TraceNode {
+  string uuid = 1;
+  string namespace = 2;
+  string source = 3;
+  string status = 4;
+  int64 timestamp = 5; // unix epoch seconds
+}
+
+message TraceEdge {
+  string child_uuid = 1;
+  string parent_uuid = 2;
+  repeated string variable_names = 3;
+}
+
+message GetActuationTraceRequest {
+  string actuation_uuid = 1;
+}
+
+message GetActuationTraceResponse {
+  repeated TraceNode nodes = 1;
+  repeated TraceEdge edges = 2;
 }
 
 message StartActuationRequest {

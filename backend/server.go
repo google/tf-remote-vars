@@ -45,6 +45,7 @@ type activeActuation struct {
 type debounceState struct {
 	timer            interface{ Stop() bool }
 	changedVariables map[string]bool
+	actuationUUIDs   map[string]bool
 }
 
 // Server implements the VarletService gRPC server.
@@ -126,7 +127,7 @@ func (s *Server) RegisterNamespace(ctx context.Context, req *pb.RegisterNamespac
 	}
 
 	uuidStr := uuid.New().String()
-	s.markActuating(ns.Name, uuidStr)
+	s.markActuating(ctx, ns.Name, uuidStr)
 
 	act := &Actuation{
 		UUID:      uuidStr,
@@ -155,7 +156,7 @@ func (s *Server) StartActuation(ctx context.Context, req *pb.StartActuationReque
 		uuidStr = uuid.New().String()
 	}
 
-	s.markActuating(ns, uuidStr)
+	s.markActuating(ctx, ns, uuidStr)
 
 	act := &Actuation{
 		UUID:      uuidStr,
@@ -169,6 +170,47 @@ func (s *Server) StartActuation(ctx context.Context, req *pb.StartActuationReque
 	}
 
 	return &pb.StartActuationResponse{}, nil
+}
+
+// GetActuationTrace retrieves the recursive lineage trace of an actuation.
+func (s *Server) GetActuationTrace(ctx context.Context, req *pb.GetActuationTraceRequest) (*pb.GetActuationTraceResponse, error) {
+	uuidStr := req.GetActuationUuid()
+	if uuidStr == "" {
+		return nil, status.Error(codes.InvalidArgument, "actuation_uuid cannot be empty")
+	}
+
+	nodes, edges, err := s.store.GetActuationTrace(ctx, uuidStr)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, status.Errorf(codes.NotFound, "actuation trace not found for UUID %s", uuidStr)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to retrieve actuation trace: %v", err)
+	}
+
+	protoNodes := make([]*pb.TraceNode, len(nodes))
+	for i, n := range nodes {
+		protoNodes[i] = &pb.TraceNode{
+			Uuid:      n.UUID,
+			Namespace: n.Namespace,
+			Source:    n.Source,
+			Status:    n.Status,
+			Timestamp: n.CreatedAt.Unix(),
+		}
+	}
+
+	protoEdges := make([]*pb.TraceEdge, len(edges))
+	for i, e := range edges {
+		protoEdges[i] = &pb.TraceEdge{
+			ChildUuid:     e.ChildUUID,
+			ParentUuid:    e.ParentUUID,
+			VariableNames: e.VariableNames,
+		}
+	}
+
+	return &pb.GetActuationTraceResponse{
+		Nodes: protoNodes,
+		Edges: protoEdges,
+	}, nil
 }
 
 // GetNamespace retrieves a namespace.
@@ -268,7 +310,7 @@ func (s *Server) PutVariable(ctx context.Context, req *pb.PutVariableRequest) (*
 			return nil, status.Errorf(codes.Internal, "failed to store variable: %v", err)
 		}
 
-		s.debounceSucceeded(v.Namespace, v.Name, true)
+		s.debounceSucceeded(v.Namespace, v.Name, true, actUUID)
 
 		// Enforce retention policy
 		ns, err := s.store.GetNamespace(ctx, nsName)
@@ -283,7 +325,7 @@ func (s *Server) PutVariable(ctx context.Context, req *pb.PutVariableRequest) (*
 			}
 		}
 	} else {
-		s.debounceSucceeded(nsName, "", false)
+		s.debounceSucceeded(nsName, "", false, actUUID)
 	}
 
 	return &pb.PutVariableResponse{}, nil
@@ -905,18 +947,22 @@ func AuditInterceptor(store Store, clock clockwork.Clock) grpc.UnaryServerInterc
 	}
 }
 
-func (s *Server) markActuating(ns string, uuid string) {
+func (s *Server) markActuating(ctx context.Context, ns string, uuid string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.actuating[ns] = &activeActuation{
 		uuid:      uuid,
 		startTime: s.clock.Now(),
 	}
 	delete(s.affected, ns)
 	delete(s.succeeded, ns)
+	s.mu.Unlock()
+
+	if err := s.store.ClearAffectedNamespace(ctx, ns); err != nil {
+		log.Printf("[WARNING] failed to clear affected namespaces for %s: %v", ns, err)
+	}
 }
 
-func (s *Server) debounceSucceeded(ns string, varName string, changed bool) {
+func (s *Server) debounceSucceeded(ns string, varName string, changed bool, actUUID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -927,19 +973,23 @@ func (s *Server) debounceSucceeded(ns string, varName string, changed bool) {
 	} else {
 		state = &debounceState{
 			changedVariables: make(map[string]bool),
+			actuationUUIDs:   make(map[string]bool),
 		}
 	}
 
 	if changed && varName != "" {
 		state.changedVariables[varName] = true
 	}
+	if actUUID != "" {
+		state.actuationUUIDs[actUUID] = true
+	}
 
 	timer := s.clock.AfterFunc(2*time.Second, func() {
 		s.mu.Lock()
 		active, ok := s.actuating[ns]
-		var actUUID string
+		var currentActUUID string
 		if ok {
-			actUUID = active.uuid
+			currentActUUID = active.uuid
 			delete(s.actuating, ns)
 		}
 		s.succeeded[ns] = true
@@ -948,18 +998,35 @@ func (s *Server) debounceSucceeded(ns string, varName string, changed bool) {
 		for v := range state.changedVariables {
 			varsToPropagate = append(varsToPropagate, v)
 		}
+
+		causalUUIDs := make([]string, 0, len(state.actuationUUIDs))
+		for u := range state.actuationUUIDs {
+			causalUUIDs = append(causalUUIDs, u)
+		}
+		if currentActUUID != "" {
+			found := false
+			for _, u := range causalUUIDs {
+				if u == currentActUUID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				causalUUIDs = append(causalUUIDs, currentActUUID)
+			}
+		}
 		
 		delete(s.debounceTimers, ns)
 		s.mu.Unlock()
 
-		if actUUID != "" {
-			if err := s.store.UpdateActuationStatus(context.Background(), actUUID, "completed"); err != nil {
-				log.Printf("[WARNING] failed to update actuation %s status to completed: %v", actUUID, err)
+		if currentActUUID != "" {
+			if err := s.store.UpdateActuationStatus(context.Background(), currentActUUID, "completed"); err != nil {
+				log.Printf("[WARNING] failed to update actuation %s status to completed: %v", currentActUUID, err)
 			}
 		}
 
 		if len(varsToPropagate) > 0 {
-			if err := s.propagateAffected(context.Background(), ns); err != nil {
+			if err := s.propagateAffected(context.Background(), ns, causalUUIDs); err != nil {
 				log.Printf("[WARNING] failed to propagate affected state from %s: %v", ns, err)
 			}
 			
@@ -975,7 +1042,7 @@ func (s *Server) debounceSucceeded(ns string, varName string, changed bool) {
 	s.debounceTimers[ns] = state
 }
 
-func (s *Server) propagateAffected(ctx context.Context, sourceNS string) error {
+func (s *Server) propagateAffected(ctx context.Context, sourceNS string, causalUUIDs []string) error {
 	allDeps, err := s.store.GetAllDependencies(ctx)
 	if err != nil {
 		return err
@@ -988,13 +1055,17 @@ func (s *Server) propagateAffected(ctx context.Context, sourceNS string) error {
 		if d.Source == sourceNS {
 			s.affected[d.Consumer] = true
 			delete(s.succeeded, d.Consumer)
+
+			if err := s.store.RecordAffectedNamespace(ctx, d.Consumer, causalUUIDs); err != nil {
+				log.Printf("[WARNING] failed to record affected namespace: %v", err)
+			}
 		}
 	}
 
 	return nil
 }
 
-func (s *Server) hasActuatingAncestor(ns string, actuating map[string]time.Time, upstream map[string][]string) bool {
+func (s *Server) hasActuatingAncestor(ns string, actuating map[string]string, upstream map[string][]string) bool {
 	queue := []string{ns}
 	visited := make(map[string]bool)
 	visited[ns] = true
@@ -1066,7 +1137,7 @@ func (s *Server) handleTimeouts(ctx context.Context) {
 	}
 }
 
-func (s *Server) calculateStatuses(ctx context.Context, namespaces []string) (map[string]string, error) {
+func (s *Server) calculateStatuses(ctx context.Context, namespaces []string) (map[string]*pb.NamespaceStatusInfo, error) {
 	s.handleTimeouts(ctx)
 
 	allDeps, err := s.store.GetAllDependencies(ctx)
@@ -1080,13 +1151,9 @@ func (s *Server) calculateStatuses(ctx context.Context, namespaces []string) (ma
 	}
 
 	s.mu.Lock()
-	actuatingCopy := make(map[string]time.Time)
+	actuatingCopy := make(map[string]string)
 	for k, v := range s.actuating {
-		actuatingCopy[k] = v.startTime
-	}
-	affectedCopy := make(map[string]bool)
-	for k, v := range s.affected {
-		affectedCopy[k] = v
+		actuatingCopy[k] = v.uuid
 	}
 	succeededCopy := make(map[string]bool)
 	for k, v := range s.succeeded {
@@ -1094,20 +1161,42 @@ func (s *Server) calculateStatuses(ctx context.Context, namespaces []string) (ma
 	}
 	s.mu.Unlock()
 
-	statuses := make(map[string]string)
+	statuses := make(map[string]*pb.NamespaceStatusInfo)
 	for _, ns := range namespaces {
-		if _, ok := actuatingCopy[ns]; ok {
-			statuses[ns] = string(StatusActuating)
-		} else if affectedCopy[ns] {
-			statuses[ns] = string(StatusAffected)
+		causalUUIDs, err := s.store.GetCausalActuationUUIDs(ctx, ns)
+		if err != nil {
+			log.Printf("[WARNING] failed to get causal UUIDs for %s: %v", ns, err)
+		}
+
+		var lastActUUID string
+		lastAct, err := s.store.GetLastActuation(ctx, ns)
+		if err == nil {
+			lastActUUID = lastAct.UUID
+		} else if !errors.Is(err, ErrNotFound) {
+			log.Printf("[WARNING] failed to get last actuation for %s: %v", ns, err)
+		}
+
+		statusStr := string(StatusIdle)
+		var activeUUID string
+
+		if uuid, ok := actuatingCopy[ns]; ok {
+			statusStr = string(StatusActuating)
+			activeUUID = uuid
+		} else if len(causalUUIDs) > 0 {
+			statusStr = string(StatusAffected)
 		} else {
 			if s.hasActuatingAncestor(ns, actuatingCopy, upstream) {
-				statuses[ns] = string(StatusPotentiallyAffected)
+				statusStr = string(StatusPotentiallyAffected)
 			} else if succeededCopy[ns] {
-				statuses[ns] = string(StatusSucceeded)
-			} else {
-				statuses[ns] = string(StatusIdle)
+				statusStr = string(StatusSucceeded)
 			}
+		}
+
+		statuses[ns] = &pb.NamespaceStatusInfo{
+			Status:               statusStr,
+			CausalActuationUuids: causalUUIDs,
+			ActiveActuationUuid:  activeUUID,
+			LastActuationUuid:    lastActUUID,
 		}
 	}
 	return statuses, nil

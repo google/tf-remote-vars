@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -58,6 +59,13 @@ type Dependency struct {
 	Variable string
 }
 
+// LineageEdge represents an edge in the actuation ancestry trace.
+type LineageEdge struct {
+	ChildUUID     string
+	ParentUUID    string
+	VariableNames []string
+}
+
 // AuditLog represents an audit log entry in Varlet.
 type AuditLog struct {
 	Timestamp time.Time
@@ -105,6 +113,13 @@ type Store interface {
 	UpdateActuationStatus(ctx context.Context, uuid string, status string) error
 	GetActuation(ctx context.Context, uuid string) (*Actuation, error)
 	GetActuationParents(ctx context.Context, uuid string) ([]string, error)
+	GetLastActuation(ctx context.Context, namespace string) (*Actuation, error)
+	GetActuationTrace(ctx context.Context, startUUID string) ([]*Actuation, []*LineageEdge, error)
+
+	// Affected namespaces tracking
+	RecordAffectedNamespace(ctx context.Context, ns string, causalUUIDs []string) error
+	ClearAffectedNamespace(ctx context.Context, ns string) error
+	GetCausalActuationUUIDs(ctx context.Context, ns string) ([]string, error)
 
 	Close() error
 }
@@ -202,6 +217,12 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		parent_actuation_uuid TEXT NOT NULL,
 		PRIMARY KEY (actuation_uuid, parent_actuation_uuid),
 		FOREIGN KEY (actuation_uuid) REFERENCES actuations(uuid) ON DELETE CASCADE
+	);
+	CREATE TABLE IF NOT EXISTS affected_namespaces (
+		namespace TEXT NOT NULL,
+		causal_actuation_uuid TEXT NOT NULL,
+		PRIMARY KEY (namespace, causal_actuation_uuid),
+		FOREIGN KEY (namespace) REFERENCES namespaces(name) ON DELETE CASCADE
 	);`
 	if _, err := db.Exec(query); err != nil {
 		db.Close()
@@ -751,5 +772,188 @@ func (s *SQLiteStore) GetAuditLogs(ctx context.Context) ([]*AuditLog, error) {
 		return nil, fmt.Errorf("rows error: %w", err)
 	}
 	return logs, nil
+}
+
+func (s *SQLiteStore) RecordAffectedNamespace(ctx context.Context, ns string, causalUUIDs []string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, u := range causalUUIDs {
+		_, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO affected_namespaces (namespace, causal_actuation_uuid) VALUES (?, ?)", ns, u)
+		if err != nil {
+			return fmt.Errorf("failed to insert affected namespace: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *SQLiteStore) ClearAffectedNamespace(ctx context.Context, ns string) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM affected_namespaces WHERE namespace = ?", ns)
+	if err != nil {
+		return fmt.Errorf("failed to clear affected namespaces: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteStore) GetCausalActuationUUIDs(ctx context.Context, ns string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT causal_actuation_uuid FROM affected_namespaces WHERE namespace = ?", ns)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query causal actuation UUIDs: %w", err)
+	}
+	defer rows.Close()
+
+	var uuids []string
+	for rows.Next() {
+		var u string
+		if err := rows.Scan(&u); err != nil {
+			return nil, fmt.Errorf("failed to scan causal actuation UUID: %w", err)
+		}
+		uuids = append(uuids, u)
+	}
+	return uuids, nil
+}
+
+func (s *SQLiteStore) GetLastActuation(ctx context.Context, namespace string) (*Actuation, error) {
+	query := `SELECT uuid, namespace, source, status, created_at FROM actuations 
+              WHERE namespace = ? AND status = 'completed'
+              ORDER BY created_at DESC LIMIT 1`
+	row := s.db.QueryRowContext(ctx, query, namespace)
+	var act Actuation
+	err := row.Scan(&act.UUID, &act.Namespace, &act.Source, &act.Status, &act.CreatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get last actuation: %w", err)
+	}
+	return &act, nil
+}
+
+func (s *SQLiteStore) GetActuationTrace(ctx context.Context, startUUID string) ([]*Actuation, []*LineageEdge, error) {
+	queryNodes := `
+	WITH RECURSIVE ancestors(uuid) AS (
+		SELECT ? AS uuid
+		UNION
+		SELECT parent_actuation_uuid FROM actuation_lineage l
+		JOIN ancestors a ON l.actuation_uuid = a.uuid
+	)
+	SELECT uuid, namespace, source, status, created_at FROM actuations
+	WHERE uuid IN ancestors`
+
+	rows, err := s.db.QueryContext(ctx, queryNodes, startUUID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to query trace nodes: %w", err)
+	}
+
+	var nodes []*Actuation
+	nodeMap := make(map[string]*Actuation)
+	var uuidList []any
+
+	err = func() error {
+		defer rows.Close()
+		for rows.Next() {
+			var act Actuation
+			err := rows.Scan(&act.UUID, &act.Namespace, &act.Source, &act.Status, &act.CreatedAt)
+			if err != nil {
+				return fmt.Errorf("failed to scan trace node: %w", err)
+			}
+			nodes = append(nodes, &act)
+			nodeMap[act.UUID] = &act
+			uuidList = append(uuidList, act.UUID)
+		}
+		return rows.Err()
+	}()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if len(nodes) == 0 {
+		return nil, nil, ErrNotFound
+	}
+
+	inPlaceholders := ""
+	for i := 0; i < len(uuidList); i++ {
+		if i > 0 {
+			inPlaceholders += ","
+		}
+		inPlaceholders += "?"
+	}
+
+	queryEdges := fmt.Sprintf(`
+		SELECT actuation_uuid, parent_actuation_uuid FROM actuation_lineage
+		WHERE actuation_uuid IN (%s) AND parent_actuation_uuid IN (%s)`, inPlaceholders, inPlaceholders)
+
+	args := append(uuidList, uuidList...)
+	edgeRows, err := s.db.QueryContext(ctx, queryEdges, args...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to query trace edges: %w", err)
+	}
+
+	type rawEdge struct {
+		child  string
+		parent string
+	}
+	var rawEdges []rawEdge
+
+	err = func() error {
+		defer edgeRows.Close()
+		for edgeRows.Next() {
+			var child, parent string
+			if err := edgeRows.Scan(&child, &parent); err != nil {
+				return fmt.Errorf("failed to scan trace edge: %w", err)
+			}
+			rawEdges = append(rawEdges, rawEdge{child: child, parent: parent})
+		}
+		return edgeRows.Err()
+	}()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var edges []*LineageEdge
+	for _, re := range rawEdges {
+		childNode := nodeMap[re.child]
+		if childNode == nil {
+			continue
+		}
+
+		parentNode := nodeMap[re.parent]
+		var vars []string
+		if parentNode != nil {
+			queryVars := `
+				SELECT DISTINCT v.name FROM variables v
+				JOIN dependencies d ON v.namespace = d.source_namespace AND v.name = d.variable_name
+				WHERE v.actuation_uuid = ? AND d.consumer_namespace = ?`
+			varRows, err := s.db.QueryContext(ctx, queryVars, re.parent, childNode.Namespace)
+			if err == nil {
+				err = func() error {
+					defer varRows.Close()
+					for varRows.Next() {
+						var vName string
+						if err := varRows.Scan(&vName); err == nil {
+							vars = append(vars, vName)
+						}
+					}
+					return varRows.Err()
+				}()
+				if err != nil {
+					log.Printf("[WARNING] failed to scan variables for trace edge: %v", err)
+				}
+			} else {
+				log.Printf("[WARNING] failed to query variables for trace edge: %v", err)
+			}
+		}
+
+		edges = append(edges, &LineageEdge{
+			ChildUUID:     re.child,
+			ParentUUID:    re.parent,
+			VariableNames: vars,
+		})
+	}
+
+	return nodes, edges, nil
 }
 

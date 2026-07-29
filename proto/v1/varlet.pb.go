@@ -1075,10 +1075,10 @@ func (x *DependencyEdge) GetVariableName() string {
 }
 
 type GetDependencyGraphResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Namespaces    []string               `protobuf:"bytes,1,rep,name=namespaces,proto3" json:"namespaces,omitempty"`
-	Edges         []*DependencyEdge      `protobuf:"bytes,2,rep,name=edges,proto3" json:"edges,omitempty"`
-	Statuses      map[string]string      `protobuf:"bytes,3,rep,name=statuses,proto3" json:"statuses,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // namespace name -> status string
+	state         protoimpl.MessageState          `protogen:"open.v1"`
+	Namespaces    []string                        `protobuf:"bytes,1,rep,name=namespaces,proto3" json:"namespaces,omitempty"`
+	Edges         []*DependencyEdge               `protobuf:"bytes,2,rep,name=edges,proto3" json:"edges,omitempty"`
+	Statuses      map[string]*NamespaceStatusInfo `protobuf:"bytes,3,rep,name=statuses,proto3" json:"statuses,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1127,9 +1127,309 @@ func (x *GetDependencyGraphResponse) GetEdges() []*DependencyEdge {
 	return nil
 }
 
-func (x *GetDependencyGraphResponse) GetStatuses() map[string]string {
+func (x *GetDependencyGraphResponse) GetStatuses() map[string]*NamespaceStatusInfo {
 	if x != nil {
 		return x.Statuses
+	}
+	return nil
+}
+
+type NamespaceStatusInfo struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	Status               string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	CausalActuationUuids []string               `protobuf:"bytes,2,rep,name=causal_actuation_uuids,json=causalActuationUuids,proto3" json:"causal_actuation_uuids,omitempty"`
+	ActiveActuationUuid  string                 `protobuf:"bytes,3,opt,name=active_actuation_uuid,json=activeActuationUuid,proto3" json:"active_actuation_uuid,omitempty"`
+	LastActuationUuid    string                 `protobuf:"bytes,4,opt,name=last_actuation_uuid,json=lastActuationUuid,proto3" json:"last_actuation_uuid,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *NamespaceStatusInfo) Reset() {
+	*x = NamespaceStatusInfo{}
+	mi := &file_proto_v1_varlet_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *NamespaceStatusInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*NamespaceStatusInfo) ProtoMessage() {}
+
+func (x *NamespaceStatusInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_varlet_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use NamespaceStatusInfo.ProtoReflect.Descriptor instead.
+func (*NamespaceStatusInfo) Descriptor() ([]byte, []int) {
+	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *NamespaceStatusInfo) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *NamespaceStatusInfo) GetCausalActuationUuids() []string {
+	if x != nil {
+		return x.CausalActuationUuids
+	}
+	return nil
+}
+
+func (x *NamespaceStatusInfo) GetActiveActuationUuid() string {
+	if x != nil {
+		return x.ActiveActuationUuid
+	}
+	return ""
+}
+
+func (x *NamespaceStatusInfo) GetLastActuationUuid() string {
+	if x != nil {
+		return x.LastActuationUuid
+	}
+	return ""
+}
+
+type TraceNode struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Uuid          string                 `protobuf:"bytes,1,opt,name=uuid,proto3" json:"uuid,omitempty"`
+	Namespace     string                 `protobuf:"bytes,2,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	Source        string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"`
+	Status        string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
+	Timestamp     int64                  `protobuf:"varint,5,opt,name=timestamp,proto3" json:"timestamp,omitempty"` // unix epoch seconds
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TraceNode) Reset() {
+	*x = TraceNode{}
+	mi := &file_proto_v1_varlet_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TraceNode) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TraceNode) ProtoMessage() {}
+
+func (x *TraceNode) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_varlet_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TraceNode.ProtoReflect.Descriptor instead.
+func (*TraceNode) Descriptor() ([]byte, []int) {
+	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *TraceNode) GetUuid() string {
+	if x != nil {
+		return x.Uuid
+	}
+	return ""
+}
+
+func (x *TraceNode) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+func (x *TraceNode) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *TraceNode) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *TraceNode) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+type TraceEdge struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ChildUuid     string                 `protobuf:"bytes,1,opt,name=child_uuid,json=childUuid,proto3" json:"child_uuid,omitempty"`
+	ParentUuid    string                 `protobuf:"bytes,2,opt,name=parent_uuid,json=parentUuid,proto3" json:"parent_uuid,omitempty"`
+	VariableNames []string               `protobuf:"bytes,3,rep,name=variable_names,json=variableNames,proto3" json:"variable_names,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TraceEdge) Reset() {
+	*x = TraceEdge{}
+	mi := &file_proto_v1_varlet_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TraceEdge) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TraceEdge) ProtoMessage() {}
+
+func (x *TraceEdge) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_varlet_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TraceEdge.ProtoReflect.Descriptor instead.
+func (*TraceEdge) Descriptor() ([]byte, []int) {
+	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *TraceEdge) GetChildUuid() string {
+	if x != nil {
+		return x.ChildUuid
+	}
+	return ""
+}
+
+func (x *TraceEdge) GetParentUuid() string {
+	if x != nil {
+		return x.ParentUuid
+	}
+	return ""
+}
+
+func (x *TraceEdge) GetVariableNames() []string {
+	if x != nil {
+		return x.VariableNames
+	}
+	return nil
+}
+
+type GetActuationTraceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ActuationUuid string                 `protobuf:"bytes,1,opt,name=actuation_uuid,json=actuationUuid,proto3" json:"actuation_uuid,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetActuationTraceRequest) Reset() {
+	*x = GetActuationTraceRequest{}
+	mi := &file_proto_v1_varlet_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetActuationTraceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetActuationTraceRequest) ProtoMessage() {}
+
+func (x *GetActuationTraceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_varlet_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetActuationTraceRequest.ProtoReflect.Descriptor instead.
+func (*GetActuationTraceRequest) Descriptor() ([]byte, []int) {
+	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *GetActuationTraceRequest) GetActuationUuid() string {
+	if x != nil {
+		return x.ActuationUuid
+	}
+	return ""
+}
+
+type GetActuationTraceResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Nodes         []*TraceNode           `protobuf:"bytes,1,rep,name=nodes,proto3" json:"nodes,omitempty"`
+	Edges         []*TraceEdge           `protobuf:"bytes,2,rep,name=edges,proto3" json:"edges,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetActuationTraceResponse) Reset() {
+	*x = GetActuationTraceResponse{}
+	mi := &file_proto_v1_varlet_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetActuationTraceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetActuationTraceResponse) ProtoMessage() {}
+
+func (x *GetActuationTraceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_varlet_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetActuationTraceResponse.ProtoReflect.Descriptor instead.
+func (*GetActuationTraceResponse) Descriptor() ([]byte, []int) {
+	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *GetActuationTraceResponse) GetNodes() []*TraceNode {
+	if x != nil {
+		return x.Nodes
+	}
+	return nil
+}
+
+func (x *GetActuationTraceResponse) GetEdges() []*TraceEdge {
+	if x != nil {
+		return x.Edges
 	}
 	return nil
 }
@@ -1145,7 +1445,7 @@ type StartActuationRequest struct {
 
 func (x *StartActuationRequest) Reset() {
 	*x = StartActuationRequest{}
-	mi := &file_proto_v1_varlet_proto_msgTypes[20]
+	mi := &file_proto_v1_varlet_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1157,7 +1457,7 @@ func (x *StartActuationRequest) String() string {
 func (*StartActuationRequest) ProtoMessage() {}
 
 func (x *StartActuationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_varlet_proto_msgTypes[20]
+	mi := &file_proto_v1_varlet_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1170,7 +1470,7 @@ func (x *StartActuationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartActuationRequest.ProtoReflect.Descriptor instead.
 func (*StartActuationRequest) Descriptor() ([]byte, []int) {
-	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{20}
+	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *StartActuationRequest) GetNamespace() string {
@@ -1202,7 +1502,7 @@ type StartActuationResponse struct {
 
 func (x *StartActuationResponse) Reset() {
 	*x = StartActuationResponse{}
-	mi := &file_proto_v1_varlet_proto_msgTypes[21]
+	mi := &file_proto_v1_varlet_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1214,7 +1514,7 @@ func (x *StartActuationResponse) String() string {
 func (*StartActuationResponse) ProtoMessage() {}
 
 func (x *StartActuationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_v1_varlet_proto_msgTypes[21]
+	mi := &file_proto_v1_varlet_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1227,7 +1527,7 @@ func (x *StartActuationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartActuationResponse.ProtoReflect.Descriptor instead.
 func (*StartActuationResponse) Descriptor() ([]byte, []int) {
-	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{21}
+	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{26}
 }
 
 var File_proto_v1_varlet_proto protoreflect.FileDescriptor
@@ -1300,21 +1600,43 @@ const file_proto_v1_varlet_proto_rawDesc = "" +
 	"\x0eDependencyEdge\x12-\n" +
 	"\x12consumer_namespace\x18\x01 \x01(\tR\x11consumerNamespace\x12)\n" +
 	"\x10source_namespace\x18\x02 \x01(\tR\x0fsourceNamespace\x12#\n" +
-	"\rvariable_name\x18\x03 \x01(\tR\fvariableName\"\xfb\x01\n" +
+	"\rvariable_name\x18\x03 \x01(\tR\fvariableName\"\x9b\x02\n" +
 	"\x1aGetDependencyGraphResponse\x12\x1e\n" +
 	"\n" +
 	"namespaces\x18\x01 \x03(\tR\n" +
 	"namespaces\x12/\n" +
 	"\x05edges\x18\x02 \x03(\v2\x19.varlet.v1.DependencyEdgeR\x05edges\x12O\n" +
-	"\bstatuses\x18\x03 \x03(\v23.varlet.v1.GetDependencyGraphResponse.StatusesEntryR\bstatuses\x1a;\n" +
+	"\bstatuses\x18\x03 \x03(\v23.varlet.v1.GetDependencyGraphResponse.StatusesEntryR\bstatuses\x1a[\n" +
 	"\rStatusesEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x92\x01\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x124\n" +
+	"\x05value\x18\x02 \x01(\v2\x1e.varlet.v1.NamespaceStatusInfoR\x05value:\x028\x01\"\xc7\x01\n" +
+	"\x13NamespaceStatusInfo\x12\x16\n" +
+	"\x06status\x18\x01 \x01(\tR\x06status\x124\n" +
+	"\x16causal_actuation_uuids\x18\x02 \x03(\tR\x14causalActuationUuids\x122\n" +
+	"\x15active_actuation_uuid\x18\x03 \x01(\tR\x13activeActuationUuid\x12.\n" +
+	"\x13last_actuation_uuid\x18\x04 \x01(\tR\x11lastActuationUuid\"\x8b\x01\n" +
+	"\tTraceNode\x12\x12\n" +
+	"\x04uuid\x18\x01 \x01(\tR\x04uuid\x12\x1c\n" +
+	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x12\x16\n" +
+	"\x06source\x18\x03 \x01(\tR\x06source\x12\x16\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\x12\x1c\n" +
+	"\ttimestamp\x18\x05 \x01(\x03R\ttimestamp\"r\n" +
+	"\tTraceEdge\x12\x1d\n" +
+	"\n" +
+	"child_uuid\x18\x01 \x01(\tR\tchildUuid\x12\x1f\n" +
+	"\vparent_uuid\x18\x02 \x01(\tR\n" +
+	"parentUuid\x12%\n" +
+	"\x0evariable_names\x18\x03 \x03(\tR\rvariableNames\"A\n" +
+	"\x18GetActuationTraceRequest\x12%\n" +
+	"\x0eactuation_uuid\x18\x01 \x01(\tR\ractuationUuid\"s\n" +
+	"\x19GetActuationTraceResponse\x12*\n" +
+	"\x05nodes\x18\x01 \x03(\v2\x14.varlet.v1.TraceNodeR\x05nodes\x12*\n" +
+	"\x05edges\x18\x02 \x03(\v2\x14.varlet.v1.TraceEdgeR\x05edges\"\x92\x01\n" +
 	"\x15StartActuationRequest\x12\x1c\n" +
 	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12%\n" +
 	"\x0eactuation_uuid\x18\x02 \x01(\tR\ractuationUuid\x124\n" +
 	"\x16parent_actuation_uuids\x18\x03 \x03(\tR\x14parentActuationUuids\"\x18\n" +
-	"\x16StartActuationResponse2\x9f\a\n" +
+	"\x16StartActuationResponse2\xff\a\n" +
 	"\rVarletService\x12^\n" +
 	"\x11RegisterNamespace\x12#.varlet.v1.RegisterNamespaceRequest\x1a$.varlet.v1.RegisterNamespaceResponse\x12O\n" +
 	"\fGetNamespace\x12\x1e.varlet.v1.GetNamespaceRequest\x1a\x1f.varlet.v1.GetNamespaceResponse\x12a\n" +
@@ -1325,7 +1647,8 @@ const file_proto_v1_varlet_proto_rawDesc = "" +
 	"\x12DeregisterConsumer\x12$.varlet.v1.DeregisterConsumerRequest\x1a%.varlet.v1.DeregisterConsumerResponse\x12[\n" +
 	"\x10GetVariableValue\x12\".varlet.v1.GetVariableValueRequest\x1a#.varlet.v1.GetVariableValueResponse\x12U\n" +
 	"\x0eStartActuation\x12 .varlet.v1.StartActuationRequest\x1a!.varlet.v1.StartActuationResponse\x12a\n" +
-	"\x12GetDependencyGraph\x12$.varlet.v1.GetDependencyGraphRequest\x1a%.varlet.v1.GetDependencyGraphResponseB,Z*github.com/google/varlet/proto/v1;varletv1b\x06proto3"
+	"\x12GetDependencyGraph\x12$.varlet.v1.GetDependencyGraphRequest\x1a%.varlet.v1.GetDependencyGraphResponse\x12^\n" +
+	"\x11GetActuationTrace\x12#.varlet.v1.GetActuationTraceRequest\x1a$.varlet.v1.GetActuationTraceResponseB,Z*github.com/google/varlet/proto/v1;varletv1b\x06proto3"
 
 var (
 	file_proto_v1_varlet_proto_rawDescOnce sync.Once
@@ -1339,7 +1662,7 @@ func file_proto_v1_varlet_proto_rawDescGZIP() []byte {
 	return file_proto_v1_varlet_proto_rawDescData
 }
 
-var file_proto_v1_varlet_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_proto_v1_varlet_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
 var file_proto_v1_varlet_proto_goTypes = []any{
 	(*RetentionPolicy)(nil),            // 0: varlet.v1.RetentionPolicy
 	(*RegisterNamespaceRequest)(nil),   // 1: varlet.v1.RegisterNamespaceRequest
@@ -1361,44 +1684,54 @@ var file_proto_v1_varlet_proto_goTypes = []any{
 	(*GetDependencyGraphRequest)(nil),  // 17: varlet.v1.GetDependencyGraphRequest
 	(*DependencyEdge)(nil),             // 18: varlet.v1.DependencyEdge
 	(*GetDependencyGraphResponse)(nil), // 19: varlet.v1.GetDependencyGraphResponse
-	(*StartActuationRequest)(nil),      // 20: varlet.v1.StartActuationRequest
-	(*StartActuationResponse)(nil),     // 21: varlet.v1.StartActuationResponse
-	nil,                                // 22: varlet.v1.GetDependencyGraphResponse.StatusesEntry
-	(*structpb.Value)(nil),             // 23: google.protobuf.Value
+	(*NamespaceStatusInfo)(nil),        // 20: varlet.v1.NamespaceStatusInfo
+	(*TraceNode)(nil),                  // 21: varlet.v1.TraceNode
+	(*TraceEdge)(nil),                  // 22: varlet.v1.TraceEdge
+	(*GetActuationTraceRequest)(nil),   // 23: varlet.v1.GetActuationTraceRequest
+	(*GetActuationTraceResponse)(nil),  // 24: varlet.v1.GetActuationTraceResponse
+	(*StartActuationRequest)(nil),      // 25: varlet.v1.StartActuationRequest
+	(*StartActuationResponse)(nil),     // 26: varlet.v1.StartActuationResponse
+	nil,                                // 27: varlet.v1.GetDependencyGraphResponse.StatusesEntry
+	(*structpb.Value)(nil),             // 28: google.protobuf.Value
 }
 var file_proto_v1_varlet_proto_depIdxs = []int32{
 	0,  // 0: varlet.v1.RegisterNamespaceRequest.retention_policy:type_name -> varlet.v1.RetentionPolicy
 	0,  // 1: varlet.v1.GetNamespaceResponse.retention_policy:type_name -> varlet.v1.RetentionPolicy
-	23, // 2: varlet.v1.PutVariableRequest.value:type_name -> google.protobuf.Value
-	23, // 3: varlet.v1.RegisterConsumerResponse.value:type_name -> google.protobuf.Value
-	23, // 4: varlet.v1.GetVariableValueResponse.value:type_name -> google.protobuf.Value
+	28, // 2: varlet.v1.PutVariableRequest.value:type_name -> google.protobuf.Value
+	28, // 3: varlet.v1.RegisterConsumerResponse.value:type_name -> google.protobuf.Value
+	28, // 4: varlet.v1.GetVariableValueResponse.value:type_name -> google.protobuf.Value
 	18, // 5: varlet.v1.GetDependencyGraphResponse.edges:type_name -> varlet.v1.DependencyEdge
-	22, // 6: varlet.v1.GetDependencyGraphResponse.statuses:type_name -> varlet.v1.GetDependencyGraphResponse.StatusesEntry
-	1,  // 7: varlet.v1.VarletService.RegisterNamespace:input_type -> varlet.v1.RegisterNamespaceRequest
-	3,  // 8: varlet.v1.VarletService.GetNamespace:input_type -> varlet.v1.GetNamespaceRequest
-	15, // 9: varlet.v1.VarletService.SetNamespacePolicy:input_type -> varlet.v1.SetNamespacePolicyRequest
-	5,  // 10: varlet.v1.VarletService.PutVariable:input_type -> varlet.v1.PutVariableRequest
-	7,  // 11: varlet.v1.VarletService.DeleteVariable:input_type -> varlet.v1.DeleteVariableRequest
-	9,  // 12: varlet.v1.VarletService.RegisterConsumer:input_type -> varlet.v1.RegisterConsumerRequest
-	11, // 13: varlet.v1.VarletService.DeregisterConsumer:input_type -> varlet.v1.DeregisterConsumerRequest
-	13, // 14: varlet.v1.VarletService.GetVariableValue:input_type -> varlet.v1.GetVariableValueRequest
-	20, // 15: varlet.v1.VarletService.StartActuation:input_type -> varlet.v1.StartActuationRequest
-	17, // 16: varlet.v1.VarletService.GetDependencyGraph:input_type -> varlet.v1.GetDependencyGraphRequest
-	2,  // 17: varlet.v1.VarletService.RegisterNamespace:output_type -> varlet.v1.RegisterNamespaceResponse
-	4,  // 18: varlet.v1.VarletService.GetNamespace:output_type -> varlet.v1.GetNamespaceResponse
-	16, // 19: varlet.v1.VarletService.SetNamespacePolicy:output_type -> varlet.v1.SetNamespacePolicyResponse
-	6,  // 20: varlet.v1.VarletService.PutVariable:output_type -> varlet.v1.PutVariableResponse
-	8,  // 21: varlet.v1.VarletService.DeleteVariable:output_type -> varlet.v1.DeleteVariableResponse
-	10, // 22: varlet.v1.VarletService.RegisterConsumer:output_type -> varlet.v1.RegisterConsumerResponse
-	12, // 23: varlet.v1.VarletService.DeregisterConsumer:output_type -> varlet.v1.DeregisterConsumerResponse
-	14, // 24: varlet.v1.VarletService.GetVariableValue:output_type -> varlet.v1.GetVariableValueResponse
-	21, // 25: varlet.v1.VarletService.StartActuation:output_type -> varlet.v1.StartActuationResponse
-	19, // 26: varlet.v1.VarletService.GetDependencyGraph:output_type -> varlet.v1.GetDependencyGraphResponse
-	17, // [17:27] is the sub-list for method output_type
-	7,  // [7:17] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	27, // 6: varlet.v1.GetDependencyGraphResponse.statuses:type_name -> varlet.v1.GetDependencyGraphResponse.StatusesEntry
+	21, // 7: varlet.v1.GetActuationTraceResponse.nodes:type_name -> varlet.v1.TraceNode
+	22, // 8: varlet.v1.GetActuationTraceResponse.edges:type_name -> varlet.v1.TraceEdge
+	20, // 9: varlet.v1.GetDependencyGraphResponse.StatusesEntry.value:type_name -> varlet.v1.NamespaceStatusInfo
+	1,  // 10: varlet.v1.VarletService.RegisterNamespace:input_type -> varlet.v1.RegisterNamespaceRequest
+	3,  // 11: varlet.v1.VarletService.GetNamespace:input_type -> varlet.v1.GetNamespaceRequest
+	15, // 12: varlet.v1.VarletService.SetNamespacePolicy:input_type -> varlet.v1.SetNamespacePolicyRequest
+	5,  // 13: varlet.v1.VarletService.PutVariable:input_type -> varlet.v1.PutVariableRequest
+	7,  // 14: varlet.v1.VarletService.DeleteVariable:input_type -> varlet.v1.DeleteVariableRequest
+	9,  // 15: varlet.v1.VarletService.RegisterConsumer:input_type -> varlet.v1.RegisterConsumerRequest
+	11, // 16: varlet.v1.VarletService.DeregisterConsumer:input_type -> varlet.v1.DeregisterConsumerRequest
+	13, // 17: varlet.v1.VarletService.GetVariableValue:input_type -> varlet.v1.GetVariableValueRequest
+	25, // 18: varlet.v1.VarletService.StartActuation:input_type -> varlet.v1.StartActuationRequest
+	17, // 19: varlet.v1.VarletService.GetDependencyGraph:input_type -> varlet.v1.GetDependencyGraphRequest
+	23, // 20: varlet.v1.VarletService.GetActuationTrace:input_type -> varlet.v1.GetActuationTraceRequest
+	2,  // 21: varlet.v1.VarletService.RegisterNamespace:output_type -> varlet.v1.RegisterNamespaceResponse
+	4,  // 22: varlet.v1.VarletService.GetNamespace:output_type -> varlet.v1.GetNamespaceResponse
+	16, // 23: varlet.v1.VarletService.SetNamespacePolicy:output_type -> varlet.v1.SetNamespacePolicyResponse
+	6,  // 24: varlet.v1.VarletService.PutVariable:output_type -> varlet.v1.PutVariableResponse
+	8,  // 25: varlet.v1.VarletService.DeleteVariable:output_type -> varlet.v1.DeleteVariableResponse
+	10, // 26: varlet.v1.VarletService.RegisterConsumer:output_type -> varlet.v1.RegisterConsumerResponse
+	12, // 27: varlet.v1.VarletService.DeregisterConsumer:output_type -> varlet.v1.DeregisterConsumerResponse
+	14, // 28: varlet.v1.VarletService.GetVariableValue:output_type -> varlet.v1.GetVariableValueResponse
+	26, // 29: varlet.v1.VarletService.StartActuation:output_type -> varlet.v1.StartActuationResponse
+	19, // 30: varlet.v1.VarletService.GetDependencyGraph:output_type -> varlet.v1.GetDependencyGraphResponse
+	24, // 31: varlet.v1.VarletService.GetActuationTrace:output_type -> varlet.v1.GetActuationTraceResponse
+	21, // [21:32] is the sub-list for method output_type
+	10, // [10:21] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_proto_v1_varlet_proto_init() }
@@ -1412,7 +1745,7 @@ func file_proto_v1_varlet_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_v1_varlet_proto_rawDesc), len(file_proto_v1_varlet_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   23,
+			NumMessages:   28,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

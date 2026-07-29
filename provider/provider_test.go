@@ -261,9 +261,17 @@ func TestAccInputResource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to register ns-a: %v", err)
 	}
+	err = store.SetNamespacePolicy(ctx, "ns-a", []string{"ns-b"})
+	if err != nil {
+		t.Fatalf("failed to set policy on ns-a: %v", err)
+	}
 	err = store.RegisterNamespace(ctx, &backend.Namespace{Name: "ns-b"})
 	if err != nil {
 		t.Fatalf("failed to register ns-b: %v", err)
+	}
+	err = store.SetNamespacePolicy(ctx, "ns-b", []string{"ns-a"})
+	if err != nil {
+		t.Fatalf("failed to set policy on ns-b: %v", err)
 	}
 
 	resource.Test(t, resource.TestCase{
@@ -412,6 +420,56 @@ resource "varlet_namespace" "ns1" {
 					resource.TestCheckResourceAttr("varlet_namespace.ns1", "allowed_consumers.#", "0"),
 					resource.TestCheckResourceAttr("varlet_namespace.ns1", "retention_policy.min_versions", "1"),
 					resource.TestCheckResourceAttr("varlet_namespace.ns1", "retention_policy.max_age_days", "2"),
+				),
+			},
+		},
+	})
+}
+
+func TestAccNamespaceDeduplicationConfig(t *testing.T) {
+	t.Parallel()
+	addr, _ := startTestServer(t)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: fmt.Sprintf(`
+provider "varlet" {
+  endpoint = %q
+}
+
+resource "varlet_namespace" "ns1" {
+  name                  = "test-dedup-ns"
+  webhook_delay_minutes = 2
+  dedup_delay_minutes   = 5
+  max_dedup_changes     = 10
+}
+`, addr),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("varlet_namespace.ns1", "id", "test-dedup-ns"),
+					resource.TestCheckResourceAttr("varlet_namespace.ns1", "webhook_delay_minutes", "2"),
+					resource.TestCheckResourceAttr("varlet_namespace.ns1", "dedup_delay_minutes", "5"),
+					resource.TestCheckResourceAttr("varlet_namespace.ns1", "max_dedup_changes", "10"),
+				),
+			},
+			{
+				Config: fmt.Sprintf(`
+provider "varlet" {
+  endpoint = %q
+}
+
+resource "varlet_namespace" "ns1" {
+  name                  = "test-dedup-ns"
+  webhook_delay_minutes = 0
+  dedup_delay_minutes   = 0
+  max_dedup_changes     = 0
+}
+`, addr),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr("varlet_namespace.ns1", "webhook_delay_minutes", "0"),
+					resource.TestCheckResourceAttr("varlet_namespace.ns1", "dedup_delay_minutes", "0"),
+					resource.TestCheckResourceAttr("varlet_namespace.ns1", "max_dedup_changes", "0"),
 				),
 			},
 		},

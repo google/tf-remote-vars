@@ -29,6 +29,7 @@ const (
 	VarletService_GetVariableValue_FullMethodName   = "/varlet.v1.VarletService/GetVariableValue"
 	VarletService_StartActuation_FullMethodName     = "/varlet.v1.VarletService/StartActuation"
 	VarletService_GetDependencyGraph_FullMethodName = "/varlet.v1.VarletService/GetDependencyGraph"
+	VarletService_GetActuationTrace_FullMethodName  = "/varlet.v1.VarletService/GetActuationTrace"
 )
 
 // VarletServiceClient is the client API for VarletService service.
@@ -51,6 +52,7 @@ type VarletServiceClient interface {
 	StartActuation(ctx context.Context, in *StartActuationRequest, opts ...grpc.CallOption) (*StartActuationResponse, error)
 	// Graph operations
 	GetDependencyGraph(ctx context.Context, in *GetDependencyGraphRequest, opts ...grpc.CallOption) (*GetDependencyGraphResponse, error)
+	GetActuationTrace(ctx context.Context, in *GetActuationTraceRequest, opts ...grpc.CallOption) (*GetActuationTraceResponse, error)
 }
 
 type varletServiceClient struct {
@@ -161,6 +163,16 @@ func (c *varletServiceClient) GetDependencyGraph(ctx context.Context, in *GetDep
 	return out, nil
 }
 
+func (c *varletServiceClient) GetActuationTrace(ctx context.Context, in *GetActuationTraceRequest, opts ...grpc.CallOption) (*GetActuationTraceResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetActuationTraceResponse)
+	err := c.cc.Invoke(ctx, VarletService_GetActuationTrace_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // VarletServiceServer is the server API for VarletService service.
 // All implementations must embed UnimplementedVarletServiceServer
 // for forward compatibility.
@@ -181,6 +193,7 @@ type VarletServiceServer interface {
 	StartActuation(context.Context, *StartActuationRequest) (*StartActuationResponse, error)
 	// Graph operations
 	GetDependencyGraph(context.Context, *GetDependencyGraphRequest) (*GetDependencyGraphResponse, error)
+	GetActuationTrace(context.Context, *GetActuationTraceRequest) (*GetActuationTraceResponse, error)
 	mustEmbedUnimplementedVarletServiceServer()
 }
 
@@ -220,6 +233,9 @@ func (UnimplementedVarletServiceServer) StartActuation(context.Context, *StartAc
 }
 func (UnimplementedVarletServiceServer) GetDependencyGraph(context.Context, *GetDependencyGraphRequest) (*GetDependencyGraphResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetDependencyGraph not implemented")
+}
+func (UnimplementedVarletServiceServer) GetActuationTrace(context.Context, *GetActuationTraceRequest) (*GetActuationTraceResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetActuationTrace not implemented")
 }
 func (UnimplementedVarletServiceServer) mustEmbedUnimplementedVarletServiceServer() {}
 func (UnimplementedVarletServiceServer) testEmbeddedByValue()                       {}
@@ -422,6 +438,24 @@ func _VarletService_GetDependencyGraph_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _VarletService_GetActuationTrace_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetActuationTraceRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VarletServiceServer).GetActuationTrace(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VarletService_GetActuationTrace_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VarletServiceServer).GetActuationTrace(ctx, req.(*GetActuationTraceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // VarletService_ServiceDesc is the grpc.ServiceDesc for VarletService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -468,6 +502,10 @@ var VarletService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetDependencyGraph",
 			Handler:    _VarletService_GetDependencyGraph_Handler,
+		},
+		{
+			MethodName: "GetActuationTrace",
+			Handler:    _VarletService_GetActuationTrace_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

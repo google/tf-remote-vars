@@ -3,6 +3,7 @@ package backend
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1376,6 +1377,213 @@ func TestGetDependencyGraph(t *testing.T) {
 			t.Errorf("expected NotFound, got %v", err)
 		}
 	})
+}
+
+func TestAffectedNamespacePersistence(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	fakeClock := clockwork.NewFakeClock()
+	server := NewServerWithClock(store, fakeClock)
+	t.Cleanup(server.Stop)
+
+	// A -> B
+	err := store.RegisterNamespace(ctx, &Namespace{Name: "A"})
+	if err != nil {
+		t.Fatalf("failed to register A: %v", err)
+	}
+	err = store.RegisterNamespace(ctx, &Namespace{Name: "B"})
+	if err != nil {
+		t.Fatalf("failed to register B: %v", err)
+	}
+
+	val, _ := structpb.NewValue("val")
+	valBytes, _ := protojson.Marshal(val)
+	v := &Variable{
+		Namespace: "A",
+		Name:      "var",
+		Version:   1,
+		Value:     valBytes,
+	}
+	if err := store.PutVariable(ctx, v); err != nil {
+		t.Fatalf("failed to put variable: %v", err)
+	}
+
+	_, err = server.SetNamespacePolicy(ctx, &pb.SetNamespacePolicyRequest{
+		Namespace:        "A",
+		AllowedConsumers: []string{"B"},
+	})
+	if err != nil {
+		t.Fatalf("failed to set policy: %v", err)
+	}
+
+	_, err = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{
+		ConsumerNamespace: "B",
+		SourceNamespace:   "A",
+		VariableName:     "var",
+	})
+	if err != nil {
+		t.Fatalf("failed to register consumer: %v", err)
+	}
+
+	// Put variable with actuation UUID
+	val2, _ := structpb.NewValue("val2")
+	_, err = server.PutVariable(ctx, &pb.PutVariableRequest{
+		Namespace:     "A",
+		Name:          "var",
+		Value:         val2,
+		ActuationUuid: "ACT-A1",
+	})
+	if err != nil {
+		t.Fatalf("failed to put variable: %v", err)
+	}
+
+	// Advance clock to trigger debounce and propagation
+	fakeClock.Advance(2 * time.Second)
+	time.Sleep(50 * time.Millisecond) // wait for async work
+
+	// 1. Verify B is affected and lists ACT-A1 as causal in dependency graph
+	resp, err := server.GetDependencyGraph(ctx, &pb.GetDependencyGraphRequest{})
+	if err != nil {
+		t.Fatalf("GetDependencyGraph failed: %v", err)
+	}
+	bStatus := resp.Statuses["B"]
+	if bStatus == nil {
+		t.Fatal("expected B status info to be non-nil")
+	}
+	if bStatus.Status != "affected" {
+		t.Errorf("expected B to be affected, got %s", bStatus.Status)
+	}
+	if len(bStatus.CausalActuationUuids) != 1 || bStatus.CausalActuationUuids[0] != "ACT-A1" {
+		t.Errorf("expected causal UUIDs [ACT-A1], got %v", bStatus.CausalActuationUuids)
+	}
+
+	// 2. Start actuation on B with UUID "ACT-B1" and verify it clears B's affected status in DB
+	_, err = server.StartActuation(ctx, &pb.StartActuationRequest{
+		Namespace:     "B",
+		ActuationUuid: "ACT-B1",
+	})
+	if err != nil {
+		t.Fatalf("StartActuation on B failed: %v", err)
+	}
+
+	resp, err = server.GetDependencyGraph(ctx, &pb.GetDependencyGraphRequest{})
+	if err != nil {
+		t.Fatalf("GetDependencyGraph failed: %v", err)
+	}
+	bStatus = resp.Statuses["B"]
+	if bStatus == nil {
+		t.Fatal("expected B status info to be non-nil")
+	}
+	if bStatus.Status != "actuating" {
+		t.Errorf("expected B to be actuating, got %s", bStatus.Status)
+	}
+	if len(bStatus.CausalActuationUuids) != 0 {
+		t.Errorf("expected 0 causal UUIDs, got %v", bStatus.CausalActuationUuids)
+	}
+}
+
+func TestGetActuationTrace(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	fakeClock := clockwork.NewFakeClock()
+	server := NewServerWithClock(store, fakeClock)
+	t.Cleanup(server.Stop)
+
+	// Topology: A -> B -> C
+	err := store.RegisterNamespace(ctx, &Namespace{Name: "A"})
+	if err != nil {
+		t.Fatalf("failed to register A: %v", err)
+	}
+	err = store.RegisterNamespace(ctx, &Namespace{Name: "B"})
+	if err != nil {
+		t.Fatalf("failed to register B: %v", err)
+	}
+	err = store.RegisterNamespace(ctx, &Namespace{Name: "C"})
+	if err != nil {
+		t.Fatalf("failed to register C: %v", err)
+	}
+
+	val, _ := structpb.NewValue("val")
+	valBytes, _ := protojson.Marshal(val)
+	if err := store.PutVariable(ctx, &Variable{Namespace: "A", Name: "varA", Version: 1, Value: valBytes}); err != nil {
+		t.Fatalf("failed to put varA: %v", err)
+	}
+	if err := store.PutVariable(ctx, &Variable{Namespace: "B", Name: "varB", Version: 1, Value: valBytes}); err != nil {
+		t.Fatalf("failed to put varB: %v", err)
+	}
+
+	_, _ = server.SetNamespacePolicy(ctx, &pb.SetNamespacePolicyRequest{Namespace: "A", AllowedConsumers: []string{"B"}})
+	_, _ = server.SetNamespacePolicy(ctx, &pb.SetNamespacePolicyRequest{Namespace: "B", AllowedConsumers: []string{"C"}})
+
+	_, _ = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{ConsumerNamespace: "B", SourceNamespace: "A", VariableName: "varA"})
+	_, _ = server.RegisterConsumer(ctx, &pb.RegisterConsumerRequest{ConsumerNamespace: "C", SourceNamespace: "B", VariableName: "varB"})
+
+	now := fakeClock.Now()
+	_ = store.CreateActuation(ctx, &Actuation{UUID: "ACT-A1", Namespace: "A", Source: "organic", Status: "completed", CreatedAt: now}, nil)
+	_ = store.PutVariable(ctx, &Variable{Namespace: "A", Name: "varA", Version: 2, Value: valBytes, ActuationUUID: "ACT-A1", CreatedAt: now})
+
+	_ = store.CreateActuation(ctx, &Actuation{UUID: "ACT-B1", Namespace: "B", Source: "webhook", Status: "completed", CreatedAt: now.Add(time.Minute)}, []string{"ACT-A1"})
+	_ = store.PutVariable(ctx, &Variable{Namespace: "B", Name: "varB", Version: 2, Value: valBytes, ActuationUUID: "ACT-B1", CreatedAt: now.Add(time.Minute)})
+
+	_ = store.CreateActuation(ctx, &Actuation{UUID: "ACT-C1", Namespace: "C", Source: "webhook", Status: "completed", CreatedAt: now.Add(2 * time.Minute)}, []string{"ACT-B1"})
+
+	resp, err := server.GetActuationTrace(ctx, &pb.GetActuationTraceRequest{ActuationUuid: "ACT-C1"})
+	if err != nil {
+		t.Fatalf("GetActuationTrace failed: %v", err)
+	}
+
+	if len(resp.Nodes) != 3 {
+		t.Fatalf("expected 3 nodes in trace, got %d", len(resp.Nodes))
+	}
+	nodeMap := make(map[string]*pb.TraceNode)
+	for _, n := range resp.Nodes {
+		nodeMap[n.Uuid] = n
+	}
+	if nodeMap["ACT-C1"] == nil || nodeMap["ACT-C1"].Namespace != "C" {
+		t.Errorf("invalid node ACT-C1: %v", nodeMap["ACT-C1"])
+	}
+	if nodeMap["ACT-B1"] == nil || nodeMap["ACT-B1"].Namespace != "B" {
+		t.Errorf("invalid node ACT-B1: %v", nodeMap["ACT-B1"])
+	}
+	if nodeMap["ACT-A1"] == nil || nodeMap["ACT-A1"].Namespace != "A" {
+		t.Errorf("invalid node ACT-A1: %v", nodeMap["ACT-A1"])
+	}
+
+	if len(resp.Edges) != 2 {
+		t.Fatalf("expected 2 edges in trace, got %d", len(resp.Edges))
+	}
+	edgeMap := make(map[string]*pb.TraceEdge)
+	for _, e := range resp.Edges {
+		key := fmt.Sprintf("%s->%s", e.ChildUuid, e.ParentUuid)
+		edgeMap[key] = e
+	}
+
+	cToB := edgeMap["ACT-C1->ACT-B1"]
+	if cToB == nil {
+		t.Fatal("missing edge ACT-C1 -> ACT-B1")
+	}
+	if len(cToB.VariableNames) != 1 || cToB.VariableNames[0] != "varB" {
+		t.Errorf("expected variables [varB] for ACT-C1 -> ACT-B1, got %v", cToB.VariableNames)
+	}
+
+	bToA := edgeMap["ACT-B1->ACT-A1"]
+	if bToA == nil {
+		t.Fatal("missing edge ACT-B1 -> ACT-A1")
+	}
+	if len(bToA.VariableNames) != 1 || bToA.VariableNames[0] != "varA" {
+		t.Errorf("expected variables [varA] for ACT-B1 -> ACT-A1, got %v", bToA.VariableNames)
+	}
+
+	_, err = server.GetActuationTrace(ctx, &pb.GetActuationTraceRequest{ActuationUuid: "non-existent"})
+	if err == nil {
+		t.Fatal("expected error for non-existent trace, got nil")
+	}
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.NotFound {
+		t.Errorf("expected NotFound, got %v", err)
+	}
 }
 
 func TestWebhookPropagation(t *testing.T) {

@@ -101,6 +101,41 @@ func main() {
 		w.Write(jsonBytes)
 	})
 
+	// JSON API for trace
+	mux.HandleFunc("/api/trace", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		uuidStr := r.URL.Query().Get("uuid")
+		if uuidStr == "" {
+			http.Error(w, "Missing uuid parameter", http.StatusBadRequest)
+			return
+		}
+
+		resp, err := serverLogic.GetActuationTrace(r.Context(), &pb.GetActuationTraceRequest{
+			ActuationUuid: uuidStr,
+		})
+		if err != nil {
+			if s, ok := status.FromError(err); ok && s.Code() == codes.NotFound {
+				http.Error(w, s.Message(), http.StatusNotFound)
+				return
+			}
+			http.Error(w, fmt.Sprintf("Failed to get trace: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		m := protojson.MarshalOptions{EmitUnpopulated: true}
+		jsonBytes, err := m.Marshal(resp)
+		if err != nil {
+			http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+			return
+		}
+		w.Write(jsonBytes)
+	})
+
 	// Serve UI files
 	subFS, err := fs.Sub(webFiles, "web")
 	if err != nil {

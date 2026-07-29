@@ -23,10 +23,57 @@
             gap: 10px;
             align-items: center;
         }
+        #main-layout {
+            display: flex;
+            flex-grow: 1;
+            height: 0;
+            position: relative;
+        }
         #cy {
             flex-grow: 1;
-            width: 100%;
             height: 100%;
+        }
+        #sidebar {
+            width: 350px;
+            background: #fafafa;
+            border-left: 1px solid #ddd;
+            padding: 15px;
+            display: none;
+            flex-direction: column;
+            overflow-y: auto;
+            box-sizing: border-box;
+        }
+        .status-badge {
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-weight: bold;
+            color: #fff;
+            display: inline-block;
+        }
+        .status-idle { background: #888; }
+        .status-affected { background: #ffa500; }
+        .status-potentially-affected { background: #add8e6; color: #000 !important; }
+        .status-actuating { background: #ffff00; color: #000 !important; }
+        .status-succeeded { background: #90ee90; color: #000 !important; }
+
+        .trace-panel {
+            margin-top: 15px;
+            border-top: 1px dashed #ccc;
+            padding-top: 15px;
+        }
+        .trace-step {
+            padding: 5px;
+            margin: 5px 0;
+            border-left: 3px solid #ccc;
+            background: #eee;
+            font-size: 0.9em;
+        }
+        .trace-var {
+            font-family: monospace;
+            background: #ddd;
+            padding: 1px 3px;
+            border-radius: 2px;
+            font-size: 0.85em;
         }
         #sim-panel {
             padding: 10px;
@@ -93,7 +140,16 @@
         </div>
     </div>
 
-    <div id="cy"></div>
+    <div id="main-layout">
+        <div id="cy"></div>
+        <div id="sidebar">
+            <button id="close-sidebar-btn" style="float: right; cursor: pointer;">X</button>
+            <h3 style="margin-top: 0;" id="sidebar-title">Namespace Details</h3>
+            <div id="sidebar-content">
+                <p>Select a node in the graph to view details.</p>
+            </div>
+        </div>
+    </div>
     <div id="message-container"></div>
 
     <div id="sim-panel">
@@ -316,6 +372,23 @@
                     {
                         selector: 'node.succeeded',
                         style: { 'background-color': '#90ee90', 'color': '#000' }
+                    },
+                    // Trace highlighting styles
+                    {
+                        selector: 'node.highlighted-trace',
+                        style: {
+                            'border-width': '4px',
+                            'border-color': '#ff4500',
+                            'background-color': '#ff6347'
+                        }
+                    },
+                    {
+                        selector: 'edge.highlighted-trace',
+                        style: {
+                            'width': 4,
+                            'line-color': '#ff4500',
+                            'target-arrow-color': '#ff4500'
+                        }
                     }
                 ],
                 layout: {
@@ -337,6 +410,14 @@
             cy.on('dblclick', 'node', function(evt){
                 const node = evt.target;
                 startSimulation(node.id());
+            });
+
+            // Click to show details in sidebar
+            cy.on('tap', 'node', function(evt){
+                const node = evt.target;
+                const ns = node.id();
+                const statusInfo = data.statuses && data.statuses[ns];
+                showNodeDetails(ns, statusInfo);
             });
         }
 
@@ -419,6 +500,165 @@
             affectedNodes.clear();
             potentiallyAffectedNodes.clear();
             actuatedNodes.clear();
+        }
+
+        document.getElementById('close-sidebar-btn').addEventListener('click', () => {
+            document.getElementById('sidebar').style.display = 'none';
+            clearTraceHighlighting();
+        });
+
+        function showNodeDetails(ns, statusInfo) {
+            const sidebar = document.getElementById('sidebar');
+            const content = document.getElementById('sidebar-content');
+            sidebar.style.display = 'flex';
+
+            if (!statusInfo) {
+                content.innerHTML = `<p>Namespace: <strong>${ns}</strong></p><p>Status: Unknown/Idle</p>`;
+                return;
+            }
+
+            const statusClass = `status-${statusInfo.status}`;
+            let html = `
+                <p>Namespace: <strong>${ns}</strong></p>
+                <p>Status: <span class="status-badge ${statusClass}">${statusInfo.status}</span></p>
+            `;
+
+            if (statusInfo.activeActuationUuid) {
+                html += `<p>Active Actuation: <span style="font-family: monospace; font-size: 0.9em;">${statusInfo.activeActuationUuid}</span></p>`;
+            }
+            if (statusInfo.lastActuationUuid) {
+                html += `<p>Last Actuation: <span style="font-family: monospace; font-size: 0.9em;">${statusInfo.lastActuationUuid}</span></p>`;
+            }
+
+            if (statusInfo.causalActuationUuids && statusInfo.causalActuationUuids.length > 0) {
+                html += `
+                    <div class="trace-panel">
+                        <h4>Causal Actuations</h4>
+                        <p style="font-size: 0.9em; color: #666;">This namespace is affected by the following upstream changes. Click to visualize ancestry:</p>
+                        <ul style="padding-left: 20px; margin: 5px 0;">
+                `;
+                statusInfo.causalActuationUuids.forEach(uuid => {
+                    html += `<li style="margin: 3px 0;"><a href="#" onclick="visualizeTrace('${uuid}'); return false;" style="font-family: monospace; font-size: 0.9em;">${uuid}</a></li>`;
+                });
+                html += `</ul></div>`;
+            } else if (statusInfo.lastActuationUuid) {
+                html += `
+                    <div class="trace-panel">
+                        <button onclick="visualizeTrace('${statusInfo.lastActuationUuid}'); return false;">Trace Ancestry</button>
+                    </div>
+                `;
+            }
+
+            content.innerHTML = html;
+        }
+
+        function visualizeTrace(uuid) {
+            clearTraceHighlighting();
+            
+            fetch(`/api/trace?uuid=${uuid}`)
+                .then(r => {
+                    if (!r.ok) throw new Error('Failed to fetch trace: ' + r.status);
+                    return r.json();
+                })
+                .then(trace => {
+                    highlightTraceOnGraph(trace);
+                    displayTraceListInSidebar(trace);
+                })
+                .catch(err => {
+                    alert(err.message);
+                });
+        }
+
+        function highlightTraceOnGraph(trace) {
+            if (!cy) return;
+            
+            if (trace.nodes) {
+                trace.nodes.forEach(n => {
+                    const el = cy.getElementById(n.namespace);
+                    if (el) {
+                        el.addClass('highlighted-trace');
+                    }
+                });
+            }
+
+            if (trace.edges && trace.nodes) {
+                const uuidToNs = {};
+                trace.nodes.forEach(n => {
+                    uuidToNs[n.uuid] = n.namespace;
+                });
+
+                trace.edges.forEach(e => {
+                    const childNs = uuidToNs[e.childUuid];
+                    const parentNs = uuidToNs[e.parentUuid];
+                    if (childNs && parentNs) {
+                        cy.edges().forEach(cyEdge => {
+                            if (cyEdge.source().id() === parentNs && cyEdge.target().id() === childNs) {
+                                cyEdge.addClass('highlighted-trace');
+                            }
+                        });
+                    }
+                });
+            }
+        }
+
+        function clearTraceHighlighting() {
+            if (cy) {
+                cy.elements().removeClass('highlighted-trace');
+            }
+            const traceList = document.getElementById('trace-list-panel');
+            if (traceList) traceList.remove();
+        }
+
+        function displayTraceListInSidebar(trace) {
+            const sidebar = document.getElementById('sidebar');
+            let traceList = document.getElementById('trace-list-panel');
+            if (traceList) traceList.remove();
+
+            traceList = document.createElement('div');
+            traceList.id = 'trace-list-panel';
+            traceList.className = 'trace-panel';
+            
+            let html = `
+                <h4>Ancestry Trace</h4>
+                <button onclick="clearTraceHighlighting(); return false;" style="margin-bottom: 10px;">Clear Highlight</button>
+                <div style="display: flex; flex-direction: column;">
+            `;
+
+            const sortedNodes = [...trace.nodes].sort((a,b) => b.timestamp - a.timestamp);
+            
+            const childToEdge = {};
+            if (trace.edges) {
+                trace.edges.forEach(e => {
+                    childToEdge[e.childUuid] = e;
+                });
+            }
+
+            sortedNodes.forEach((node, idx) => {
+                const dt = new Date(node.timestamp * 1000).toLocaleString();
+                html += `
+                    <div class="trace-step">
+                        <strong>${node.namespace}</strong> (${node.source})<br/>
+                        <span style="font-family: monospace; font-size: 0.85em; color: #666;">${node.uuid}</span><br/>
+                        <span style="font-size: 0.8em; color: #888;">${dt}</span>
+                `;
+                
+                const edge = childToEdge[node.uuid];
+                if (edge && edge.variableNames && edge.variableNames.length > 0) {
+                    html += `<br/><span style="font-size: 0.85em; color: #444;">Triggered by: </span>`;
+                    edge.variableNames.forEach(v => {
+                        html += `<span class="trace-var">${v}</span> `;
+                    });
+                }
+
+                html += `</div>`;
+                if (idx < sortedNodes.length - 1) {
+                    html += `<div style="text-align: center; color: #ff4500; font-weight: bold; margin: 2px 0;">↑</div>`;
+                }
+            });
+
+            html += `</div>`;
+            traceList.innerHTML = html;
+            sidebar.appendChild(traceList);
         }
     </script>
 </body>

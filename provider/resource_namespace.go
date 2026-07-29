@@ -37,9 +37,12 @@ type NamespaceResourceModel struct {
 	Name                types.String                 `tfsdk:"name"`
 	RunWebhookURL       types.String                 `tfsdk:"run_webhook_url"`
 	WebhookDelayMinutes types.Int64                  `tfsdk:"webhook_delay_minutes"`
+	DedupDelayMinutes   types.Int64                  `tfsdk:"dedup_delay_minutes"`
+	MaxDedupChanges     types.Int64                  `tfsdk:"max_dedup_changes"`
 	AllowedConsumers    types.Set                    `tfsdk:"allowed_consumers"`
 	RetentionPolicy     *RetentionPolicyProductModel `tfsdk:"retention_policy"`
 }
+
 
 type RetentionPolicyProductModel struct {
 	MinVersions types.Int64 `tfsdk:"min_versions"`
@@ -77,6 +80,18 @@ func (r *NamespaceResource) Schema(ctx context.Context, req resource.SchemaReque
 				Computed:            true,
 				Default:             int64default.StaticInt64(0),
 				MarkdownDescription: "Number of minutes to delay triggering the webhook on changes.",
+			},
+			"dedup_delay_minutes": schema.Int64Attribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(0),
+				MarkdownDescription: "Number of minutes to debounce outgoing webhooks for this namespace.",
+			},
+			"max_dedup_changes": schema.Int64Attribute{
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(0),
+				MarkdownDescription: "Maximum changes to accumulate before forcing a webhook trigger.",
 			},
 			"allowed_consumers": schema.SetAttribute{
 				ElementType:         types.StringType,
@@ -137,6 +152,8 @@ func (r *NamespaceResource) Create(ctx context.Context, req resource.CreateReque
 		Name:                data.Name.ValueString(),
 		RunWebhookUrl:       data.RunWebhookURL.ValueString(),
 		WebhookDelayMinutes: int32(data.WebhookDelayMinutes.ValueInt64()),
+		DedupDelayMinutes:   int32(data.DedupDelayMinutes.ValueInt64()),
+		MaxDedupChanges:     int32(data.MaxDedupChanges.ValueInt64()),
 	}
 	if data.RetentionPolicy != nil {
 		registerReq.RetentionPolicy = &pb.RetentionPolicy{
@@ -204,6 +221,8 @@ func (r *NamespaceResource) Read(ctx context.Context, req resource.ReadRequest, 
 	}
 
 	data.WebhookDelayMinutes = types.Int64Value(int64(ns.GetWebhookDelayMinutes()))
+	data.DedupDelayMinutes = types.Int64Value(int64(ns.GetDedupDelayMinutes()))
+	data.MaxDedupChanges = types.Int64Value(int64(ns.GetMaxDedupChanges()))
 
 	if len(ns.GetAllowedConsumers()) > 0 {
 		allowedSet, diags := types.SetValueFrom(ctx, types.StringType, ns.GetAllowedConsumers())
@@ -243,6 +262,8 @@ func (r *NamespaceResource) Update(ctx context.Context, req resource.UpdateReque
 		Name:                data.Name.ValueString(),
 		RunWebhookUrl:       data.RunWebhookURL.ValueString(),
 		WebhookDelayMinutes: int32(data.WebhookDelayMinutes.ValueInt64()),
+		DedupDelayMinutes:   int32(data.DedupDelayMinutes.ValueInt64()),
+		MaxDedupChanges:     int32(data.MaxDedupChanges.ValueInt64()),
 	}
 	if data.RetentionPolicy != nil {
 		registerReq.RetentionPolicy = &pb.RetentionPolicy{

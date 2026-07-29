@@ -61,11 +61,11 @@ func TestStatusTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDependencyGraph failed: %v", err)
 	}
-	if status := graph.Statuses["A"]; status != "idle" {
-		t.Errorf("expected A to be idle, got %s", status)
+	if statusInfo := graph.Statuses["A"]; statusInfo == nil || statusInfo.Status != "idle" {
+		t.Errorf("expected A to be idle, got %v", statusInfo)
 	}
-	if status := graph.Statuses["B"]; status != "idle" {
-		t.Errorf("expected B to be idle, got %s", status)
+	if statusInfo := graph.Statuses["B"]; statusInfo == nil || statusInfo.Status != "idle" {
+		t.Errorf("expected B to be idle, got %v", statusInfo)
 	}
 
 
@@ -78,11 +78,11 @@ func TestStatusTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDependencyGraph failed: %v", err)
 	}
-	if status := graph.Statuses["A"]; status != "actuating" {
-		t.Errorf("expected A to be actuating, got %s", status)
+	if statusInfo := graph.Statuses["A"]; statusInfo == nil || statusInfo.Status != "actuating" {
+		t.Errorf("expected A to be actuating, got %v", statusInfo)
 	}
-	if status := graph.Statuses["B"]; status != "potentially-affected" {
-		t.Errorf("expected B to be potentially-affected, got %s", status)
+	if statusInfo := graph.Statuses["B"]; statusInfo == nil || statusInfo.Status != "potentially-affected" {
+		t.Errorf("expected B to be potentially-affected, got %v", statusInfo)
 	}
 
 
@@ -102,11 +102,11 @@ func TestStatusTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDependencyGraph failed: %v", err)
 	}
-	if status := graph.Statuses["A"]; status != "succeeded" {
-		t.Errorf("expected A to be succeeded, got %s", status)
+	if statusInfo := graph.Statuses["A"]; statusInfo == nil || statusInfo.Status != "succeeded" {
+		t.Errorf("expected A to be succeeded, got %v", statusInfo)
 	}
-	if status := graph.Statuses["B"]; status != "affected" {
-		t.Errorf("expected B to be affected, got %s", status)
+	if statusInfo := graph.Statuses["B"]; statusInfo == nil || statusInfo.Status != "affected" {
+		t.Errorf("expected B to be affected, got %v", statusInfo)
 	}
 
 
@@ -119,8 +119,8 @@ func TestStatusTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDependencyGraph failed: %v", err)
 	}
-	if status := graph.Statuses["B"]; status != "actuating" {
-		t.Errorf("expected B to be actuating, got %s", status)
+	if statusInfo := graph.Statuses["B"]; statusInfo == nil || statusInfo.Status != "actuating" {
+		t.Errorf("expected B to be actuating, got %v", statusInfo)
 	}
 
 
@@ -130,7 +130,7 @@ func TestStatusTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDependencyGraph failed: %v", err)
 	}
-	if status := graph.Statuses["B"]; status != "succeeded" {
-		t.Errorf("expected B to be succeeded after timeout, got %s", status)
+	if statusInfo := graph.Statuses["B"]; statusInfo == nil || statusInfo.Status != "succeeded" {
+		t.Errorf("expected B to be succeeded after timeout, got %v", statusInfo)
 	}
 }
