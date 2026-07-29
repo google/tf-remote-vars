@@ -5,9 +5,9 @@ A backend RPC endpoint `GetActuationTrace` that retrieves the recursive ancestor
 
 **Blocked by:** 0011 — Status Details Schema & Affected Tracking
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Implement the `GetActuationTrace` RPC handler in `backend/server.go`.
-- [ ] The RPC handler queries the database using a SQLite recursive CTE to traverse `actuation_lineage` and gather all ancestor actuations.
-- [ ] The RPC handler retrieves modified variables for the trace nodes and filters them to include only variables that are in the downstream consumer's dependencies list.
-- [ ] Integration tests in `backend/server_test.go` assert that `GetActuationTrace` returns the correct recursive chain of actuations, namespaces, and variable names for a multi-stage topology.
+- [x] Implement the `GetActuationTrace` RPC handler in `backend/server.go`.
+- [x] The RPC handler queries the database using a SQLite recursive CTE to traverse `actuation_lineage` and gather all ancestor actuations.
+- [x] The RPC handler retrieves modified variables for the trace nodes and filters them to include only variables that are in the downstream consumer's dependencies list.
+- [x] Integration tests in `backend/server_test.go` assert that `GetActuationTrace` returns the correct recursive chain of actuations, namespaces, and variable names for a multi-stage topology.
