@@ -1086,6 +1086,86 @@ func (x *GetDependencyGraphResponse) GetStatuses() map[string]string {
 	return nil
 }
 
+type StartActuationRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Namespace     string                 `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartActuationRequest) Reset() {
+	*x = StartActuationRequest{}
+	mi := &file_proto_v1_varlet_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartActuationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartActuationRequest) ProtoMessage() {}
+
+func (x *StartActuationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_varlet_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartActuationRequest.ProtoReflect.Descriptor instead.
+func (*StartActuationRequest) Descriptor() ([]byte, []int) {
+	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *StartActuationRequest) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+type StartActuationResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartActuationResponse) Reset() {
+	*x = StartActuationResponse{}
+	mi := &file_proto_v1_varlet_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartActuationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartActuationResponse) ProtoMessage() {}
+
+func (x *StartActuationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_v1_varlet_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartActuationResponse.ProtoReflect.Descriptor instead.
+func (*StartActuationResponse) Descriptor() ([]byte, []int) {
+	return file_proto_v1_varlet_proto_rawDescGZIP(), []int{21}
+}
+
 var File_proto_v1_varlet_proto protoreflect.FileDescriptor
 
 const file_proto_v1_varlet_proto_rawDesc = "" +
@@ -1159,7 +1239,10 @@ const file_proto_v1_varlet_proto_rawDesc = "" +
 	"\bstatuses\x18\x03 \x03(\v23.varlet.v1.GetDependencyGraphResponse.StatusesEntryR\bstatuses\x1a;\n" +
 	"\rStatusesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x012\xc8\x06\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"5\n" +
+	"\x15StartActuationRequest\x12\x1c\n" +
+	"\tnamespace\x18\x01 \x01(\tR\tnamespace\"\x18\n" +
+	"\x16StartActuationResponse2\x9f\a\n" +
 	"\rVarletService\x12^\n" +
 	"\x11RegisterNamespace\x12#.varlet.v1.RegisterNamespaceRequest\x1a$.varlet.v1.RegisterNamespaceResponse\x12O\n" +
 	"\fGetNamespace\x12\x1e.varlet.v1.GetNamespaceRequest\x1a\x1f.varlet.v1.GetNamespaceResponse\x12a\n" +
@@ -1168,7 +1251,8 @@ const file_proto_v1_varlet_proto_rawDesc = "" +
 	"\x0eDeleteVariable\x12 .varlet.v1.DeleteVariableRequest\x1a!.varlet.v1.DeleteVariableResponse\x12[\n" +
 	"\x10RegisterConsumer\x12\".varlet.v1.RegisterConsumerRequest\x1a#.varlet.v1.RegisterConsumerResponse\x12a\n" +
 	"\x12DeregisterConsumer\x12$.varlet.v1.DeregisterConsumerRequest\x1a%.varlet.v1.DeregisterConsumerResponse\x12[\n" +
-	"\x10GetVariableValue\x12\".varlet.v1.GetVariableValueRequest\x1a#.varlet.v1.GetVariableValueResponse\x12a\n" +
+	"\x10GetVariableValue\x12\".varlet.v1.GetVariableValueRequest\x1a#.varlet.v1.GetVariableValueResponse\x12U\n" +
+	"\x0eStartActuation\x12 .varlet.v1.StartActuationRequest\x1a!.varlet.v1.StartActuationResponse\x12a\n" +
 	"\x12GetDependencyGraph\x12$.varlet.v1.GetDependencyGraphRequest\x1a%.varlet.v1.GetDependencyGraphResponseB,Z*github.com/google/varlet/proto/v1;varletv1b\x06proto3"
 
 var (
@@ -1183,7 +1267,7 @@ func file_proto_v1_varlet_proto_rawDescGZIP() []byte {
 	return file_proto_v1_varlet_proto_rawDescData
 }
 
-var file_proto_v1_varlet_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_proto_v1_varlet_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_proto_v1_varlet_proto_goTypes = []any{
 	(*RetentionPolicy)(nil),            // 0: varlet.v1.RetentionPolicy
 	(*RegisterNamespaceRequest)(nil),   // 1: varlet.v1.RegisterNamespaceRequest
@@ -1205,17 +1289,19 @@ var file_proto_v1_varlet_proto_goTypes = []any{
 	(*GetDependencyGraphRequest)(nil),  // 17: varlet.v1.GetDependencyGraphRequest
 	(*DependencyEdge)(nil),             // 18: varlet.v1.DependencyEdge
 	(*GetDependencyGraphResponse)(nil), // 19: varlet.v1.GetDependencyGraphResponse
-	nil,                                // 20: varlet.v1.GetDependencyGraphResponse.StatusesEntry
-	(*structpb.Value)(nil),             // 21: google.protobuf.Value
+	(*StartActuationRequest)(nil),      // 20: varlet.v1.StartActuationRequest
+	(*StartActuationResponse)(nil),     // 21: varlet.v1.StartActuationResponse
+	nil,                                // 22: varlet.v1.GetDependencyGraphResponse.StatusesEntry
+	(*structpb.Value)(nil),             // 23: google.protobuf.Value
 }
 var file_proto_v1_varlet_proto_depIdxs = []int32{
 	0,  // 0: varlet.v1.RegisterNamespaceRequest.retention_policy:type_name -> varlet.v1.RetentionPolicy
 	0,  // 1: varlet.v1.GetNamespaceResponse.retention_policy:type_name -> varlet.v1.RetentionPolicy
-	21, // 2: varlet.v1.PutVariableRequest.value:type_name -> google.protobuf.Value
-	21, // 3: varlet.v1.RegisterConsumerResponse.value:type_name -> google.protobuf.Value
-	21, // 4: varlet.v1.GetVariableValueResponse.value:type_name -> google.protobuf.Value
+	23, // 2: varlet.v1.PutVariableRequest.value:type_name -> google.protobuf.Value
+	23, // 3: varlet.v1.RegisterConsumerResponse.value:type_name -> google.protobuf.Value
+	23, // 4: varlet.v1.GetVariableValueResponse.value:type_name -> google.protobuf.Value
 	18, // 5: varlet.v1.GetDependencyGraphResponse.edges:type_name -> varlet.v1.DependencyEdge
-	20, // 6: varlet.v1.GetDependencyGraphResponse.statuses:type_name -> varlet.v1.GetDependencyGraphResponse.StatusesEntry
+	22, // 6: varlet.v1.GetDependencyGraphResponse.statuses:type_name -> varlet.v1.GetDependencyGraphResponse.StatusesEntry
 	1,  // 7: varlet.v1.VarletService.RegisterNamespace:input_type -> varlet.v1.RegisterNamespaceRequest
 	3,  // 8: varlet.v1.VarletService.GetNamespace:input_type -> varlet.v1.GetNamespaceRequest
 	15, // 9: varlet.v1.VarletService.SetNamespacePolicy:input_type -> varlet.v1.SetNamespacePolicyRequest
@@ -1224,18 +1310,20 @@ var file_proto_v1_varlet_proto_depIdxs = []int32{
 	9,  // 12: varlet.v1.VarletService.RegisterConsumer:input_type -> varlet.v1.RegisterConsumerRequest
 	11, // 13: varlet.v1.VarletService.DeregisterConsumer:input_type -> varlet.v1.DeregisterConsumerRequest
 	13, // 14: varlet.v1.VarletService.GetVariableValue:input_type -> varlet.v1.GetVariableValueRequest
-	17, // 15: varlet.v1.VarletService.GetDependencyGraph:input_type -> varlet.v1.GetDependencyGraphRequest
-	2,  // 16: varlet.v1.VarletService.RegisterNamespace:output_type -> varlet.v1.RegisterNamespaceResponse
-	4,  // 17: varlet.v1.VarletService.GetNamespace:output_type -> varlet.v1.GetNamespaceResponse
-	16, // 18: varlet.v1.VarletService.SetNamespacePolicy:output_type -> varlet.v1.SetNamespacePolicyResponse
-	6,  // 19: varlet.v1.VarletService.PutVariable:output_type -> varlet.v1.PutVariableResponse
-	8,  // 20: varlet.v1.VarletService.DeleteVariable:output_type -> varlet.v1.DeleteVariableResponse
-	10, // 21: varlet.v1.VarletService.RegisterConsumer:output_type -> varlet.v1.RegisterConsumerResponse
-	12, // 22: varlet.v1.VarletService.DeregisterConsumer:output_type -> varlet.v1.DeregisterConsumerResponse
-	14, // 23: varlet.v1.VarletService.GetVariableValue:output_type -> varlet.v1.GetVariableValueResponse
-	19, // 24: varlet.v1.VarletService.GetDependencyGraph:output_type -> varlet.v1.GetDependencyGraphResponse
-	16, // [16:25] is the sub-list for method output_type
-	7,  // [7:16] is the sub-list for method input_type
+	20, // 15: varlet.v1.VarletService.StartActuation:input_type -> varlet.v1.StartActuationRequest
+	17, // 16: varlet.v1.VarletService.GetDependencyGraph:input_type -> varlet.v1.GetDependencyGraphRequest
+	2,  // 17: varlet.v1.VarletService.RegisterNamespace:output_type -> varlet.v1.RegisterNamespaceResponse
+	4,  // 18: varlet.v1.VarletService.GetNamespace:output_type -> varlet.v1.GetNamespaceResponse
+	16, // 19: varlet.v1.VarletService.SetNamespacePolicy:output_type -> varlet.v1.SetNamespacePolicyResponse
+	6,  // 20: varlet.v1.VarletService.PutVariable:output_type -> varlet.v1.PutVariableResponse
+	8,  // 21: varlet.v1.VarletService.DeleteVariable:output_type -> varlet.v1.DeleteVariableResponse
+	10, // 22: varlet.v1.VarletService.RegisterConsumer:output_type -> varlet.v1.RegisterConsumerResponse
+	12, // 23: varlet.v1.VarletService.DeregisterConsumer:output_type -> varlet.v1.DeregisterConsumerResponse
+	14, // 24: varlet.v1.VarletService.GetVariableValue:output_type -> varlet.v1.GetVariableValueResponse
+	21, // 25: varlet.v1.VarletService.StartActuation:output_type -> varlet.v1.StartActuationResponse
+	19, // 26: varlet.v1.VarletService.GetDependencyGraph:output_type -> varlet.v1.GetDependencyGraphResponse
+	17, // [17:27] is the sub-list for method output_type
+	7,  // [7:17] is the sub-list for method input_type
 	7,  // [7:7] is the sub-list for extension type_name
 	7,  // [7:7] is the sub-list for extension extendee
 	0,  // [0:7] is the sub-list for field type_name
@@ -1252,7 +1340,7 @@ func file_proto_v1_varlet_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_v1_varlet_proto_rawDesc), len(file_proto_v1_varlet_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   21,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

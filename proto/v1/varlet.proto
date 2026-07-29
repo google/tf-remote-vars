@@ -22,6 +22,8 @@ service VarletService {
   rpc DeregisterConsumer(DeregisterConsumerRequest) returns (DeregisterConsumerResponse);
   rpc GetVariableValue(GetVariableValueRequest) returns (GetVariableValueResponse);
 
+  rpc StartActuation(StartActuationRequest) returns (StartActuationResponse);
+
   // Graph operations
   rpc GetDependencyGraph(GetDependencyGraphRequest) returns (GetDependencyGraphResponse);
 }
@@ -132,3 +134,10 @@ message GetDependencyGraphResponse {
   repeated DependencyEdge edges = 2;
   map<string, string> statuses = 3; // namespace name -> status string
 }
+
+message StartActuationRequest {
+  string namespace = 1;
+}
+
+message StartActuationResponse {}
+

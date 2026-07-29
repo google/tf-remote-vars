@@ -96,6 +96,8 @@ func TestStatusTransitions(t *testing.T) {
 		t.Fatalf("PutVariable A failed: %v", err)
 	}
 
+	fakeClock.Advance(2 * time.Second)
+
 	graph, err = server.GetDependencyGraph(ctx, &pb.GetDependencyGraphRequest{})
 	if err != nil {
 		t.Fatalf("GetDependencyGraph failed: %v", err)

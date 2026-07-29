@@ -92,6 +92,18 @@ func (p *VarletProvider) Configure(ctx context.Context, req provider.ConfigureRe
 
 	client := pb.NewVarletServiceClient(conn)
 
+	if namespace != "" {
+		_, err := client.StartActuation(ctx, &pb.StartActuationRequest{
+			Namespace: namespace,
+		})
+		if err != nil {
+			resp.Diagnostics.AddWarning(
+				"Failed to signal actuation start",
+				"Could not contact Varlet backend to signal actuation start: "+err.Error(),
+			)
+		}
+	}
+
 	providerData := &VarletProviderData{
 		Client:    client,
 		Namespace: namespace,

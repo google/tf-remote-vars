@@ -36,25 +36,32 @@ const (
 	StatusPotentiallyAffected NamespaceStatus = "potentially-affected"
 )
 
+type debounceState struct {
+	timer            interface{ Stop() bool }
+	changedVariables map[string]bool
+}
+
 // Server implements the VarletService gRPC server.
 type Server struct {
 	pb.UnimplementedVarletServiceServer
 	store Store
 	clock clockwork.Clock
 
-	mu        sync.Mutex
-	actuating map[string]time.Time
-	affected  map[string]bool
-	succeeded map[string]bool
+	mu             sync.Mutex
+	actuating      map[string]time.Time
+	affected       map[string]bool
+	succeeded      map[string]bool
+	debounceTimers map[string]*debounceState
 }
 
 func newServer(store Store, clock clockwork.Clock) *Server {
 	return &Server{
-		store:     store,
-		clock:     clock,
-		actuating: make(map[string]time.Time),
-		affected:  make(map[string]bool),
-		succeeded: make(map[string]bool),
+		store:          store,
+		clock:          clock,
+		actuating:      make(map[string]time.Time),
+		affected:       make(map[string]bool),
+		succeeded:      make(map[string]bool),
+		debounceTimers: make(map[string]*debounceState),
 	}
 }
 
@@ -97,6 +104,17 @@ func (s *Server) RegisterNamespace(ctx context.Context, req *pb.RegisterNamespac
 	return &pb.RegisterNamespaceResponse{
 		Name: ns.Name,
 	}, nil
+}
+
+func (s *Server) StartActuation(ctx context.Context, req *pb.StartActuationRequest) (*pb.StartActuationResponse, error) {
+	ns := req.GetNamespace()
+	if ns == "" {
+		return nil, status.Error(codes.InvalidArgument, "namespace cannot be empty")
+	}
+
+	s.markActuating(ns)
+
+	return &pb.StartActuationResponse{}, nil
 }
 
 // GetNamespace retrieves a namespace.
@@ -181,11 +199,7 @@ func (s *Server) PutVariable(ctx context.Context, req *pb.PutVariableRequest) (*
 			return nil, status.Errorf(codes.Internal, "failed to store variable: %v", err)
 		}
 
-		s.markSucceeded(v.Namespace)
-
-		if err := s.propagateAffected(ctx, v.Namespace); err != nil {
-			log.Printf("[WARNING] failed to propagate affected state from %s: %v", v.Namespace, err)
-		}
+		s.debounceSucceeded(v.Namespace, v.Name, true)
 
 		// Enforce retention policy
 		ns, err := s.store.GetNamespace(ctx, req.GetNamespace())
@@ -199,13 +213,8 @@ func (s *Server) PutVariable(ctx context.Context, req *pb.PutVariableRequest) (*
 				return nil, status.Errorf(codes.Internal, "failed to enforce retention policy: %v", err)
 			}
 		}
-		// Trigger downstream webhooks if there are consumers
-		hasCons, err := s.store.HasConsumers(ctx, v.Namespace, v.Name)
-		if err == nil && hasCons {
-			go s.propagateChange(context.Background(), v.Namespace, v.Name)
-		}
 	} else {
-		s.markSucceeded(req.GetNamespace())
+		s.debounceSucceeded(req.GetNamespace(), "", false)
 	}
 
 	return &pb.PutVariableResponse{}, nil
@@ -731,11 +740,52 @@ func (s *Server) markActuating(ns string) {
 	delete(s.succeeded, ns)
 }
 
-func (s *Server) markSucceeded(ns string) {
+func (s *Server) debounceSucceeded(ns string, varName string, changed bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.actuating, ns)
-	s.succeeded[ns] = true
+
+	var state *debounceState
+	if existing, ok := s.debounceTimers[ns]; ok {
+		existing.timer.Stop()
+		state = existing
+	} else {
+		state = &debounceState{
+			changedVariables: make(map[string]bool),
+		}
+	}
+
+	if changed && varName != "" {
+		state.changedVariables[varName] = true
+	}
+
+	timer := s.clock.AfterFunc(2*time.Second, func() {
+		s.mu.Lock()
+		delete(s.actuating, ns)
+		s.succeeded[ns] = true
+		
+		varsToPropagate := make([]string, 0, len(state.changedVariables))
+		for v := range state.changedVariables {
+			varsToPropagate = append(varsToPropagate, v)
+		}
+		
+		delete(s.debounceTimers, ns)
+		s.mu.Unlock()
+
+		if len(varsToPropagate) > 0 {
+			if err := s.propagateAffected(context.Background(), ns); err != nil {
+				log.Printf("[WARNING] failed to propagate affected state from %s: %v", ns, err)
+			}
+			
+			for _, vName := range varsToPropagate {
+				hasCons, err := s.store.HasConsumers(context.Background(), ns, vName)
+				if err == nil && hasCons {
+					go s.propagateChange(context.Background(), ns, vName)
+				}
+			}
+		}
+	})
+	state.timer = timer
+	s.debounceTimers[ns] = state
 }
 
 func (s *Server) propagateAffected(ctx context.Context, sourceNS string) error {
@@ -795,17 +845,22 @@ func (s *Server) handleTimeouts(ctx context.Context) {
 	s.mu.Unlock()
 
 	now := s.clock.Now()
-	timeout := 45 * time.Second
+	shortTimeout := 45 * time.Second
+	longTimeout := 5 * time.Minute
 
 	var toSucceed []string
 	for ns, startTime := range candidates {
-		if now.Sub(startTime) > timeout {
+		elapsed := now.Sub(startTime)
+		if elapsed > shortTimeout {
 			hasVars, err := s.store.HasVariables(ctx, ns)
 			if err != nil {
 				log.Printf("[WARNING] failed to check if namespace %s has variables: %v", ns, err)
 				continue
 			}
 			if !hasVars {
+				toSucceed = append(toSucceed, ns)
+			} else if elapsed > longTimeout {
+				log.Printf("[INFO] Actuation for namespace %s (with outputs) timed out after long duration, marking as succeeded", ns)
 				toSucceed = append(toSucceed, ns)
 			}
 		}
@@ -815,7 +870,7 @@ func (s *Server) handleTimeouts(ctx context.Context) {
 		s.mu.Lock()
 		for _, ns := range toSucceed {
 			if _, ok := s.actuating[ns]; ok {
-				log.Printf("[INFO] Actuation for input-only namespace %s timed out, marking as succeeded", ns)
+				log.Printf("[INFO] Marking namespace %s as succeeded due to timeout", ns)
 				delete(s.actuating, ns)
 				s.succeeded[ns] = true
 			}

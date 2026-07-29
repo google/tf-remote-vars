@@ -27,6 +27,7 @@ const (
 	VarletService_RegisterConsumer_FullMethodName   = "/varlet.v1.VarletService/RegisterConsumer"
 	VarletService_DeregisterConsumer_FullMethodName = "/varlet.v1.VarletService/DeregisterConsumer"
 	VarletService_GetVariableValue_FullMethodName   = "/varlet.v1.VarletService/GetVariableValue"
+	VarletService_StartActuation_FullMethodName     = "/varlet.v1.VarletService/StartActuation"
 	VarletService_GetDependencyGraph_FullMethodName = "/varlet.v1.VarletService/GetDependencyGraph"
 )
 
@@ -47,6 +48,7 @@ type VarletServiceClient interface {
 	RegisterConsumer(ctx context.Context, in *RegisterConsumerRequest, opts ...grpc.CallOption) (*RegisterConsumerResponse, error)
 	DeregisterConsumer(ctx context.Context, in *DeregisterConsumerRequest, opts ...grpc.CallOption) (*DeregisterConsumerResponse, error)
 	GetVariableValue(ctx context.Context, in *GetVariableValueRequest, opts ...grpc.CallOption) (*GetVariableValueResponse, error)
+	StartActuation(ctx context.Context, in *StartActuationRequest, opts ...grpc.CallOption) (*StartActuationResponse, error)
 	// Graph operations
 	GetDependencyGraph(ctx context.Context, in *GetDependencyGraphRequest, opts ...grpc.CallOption) (*GetDependencyGraphResponse, error)
 }
@@ -139,6 +141,16 @@ func (c *varletServiceClient) GetVariableValue(ctx context.Context, in *GetVaria
 	return out, nil
 }
 
+func (c *varletServiceClient) StartActuation(ctx context.Context, in *StartActuationRequest, opts ...grpc.CallOption) (*StartActuationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StartActuationResponse)
+	err := c.cc.Invoke(ctx, VarletService_StartActuation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *varletServiceClient) GetDependencyGraph(ctx context.Context, in *GetDependencyGraphRequest, opts ...grpc.CallOption) (*GetDependencyGraphResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetDependencyGraphResponse)
@@ -166,6 +178,7 @@ type VarletServiceServer interface {
 	RegisterConsumer(context.Context, *RegisterConsumerRequest) (*RegisterConsumerResponse, error)
 	DeregisterConsumer(context.Context, *DeregisterConsumerRequest) (*DeregisterConsumerResponse, error)
 	GetVariableValue(context.Context, *GetVariableValueRequest) (*GetVariableValueResponse, error)
+	StartActuation(context.Context, *StartActuationRequest) (*StartActuationResponse, error)
 	// Graph operations
 	GetDependencyGraph(context.Context, *GetDependencyGraphRequest) (*GetDependencyGraphResponse, error)
 	mustEmbedUnimplementedVarletServiceServer()
@@ -201,6 +214,9 @@ func (UnimplementedVarletServiceServer) DeregisterConsumer(context.Context, *Der
 }
 func (UnimplementedVarletServiceServer) GetVariableValue(context.Context, *GetVariableValueRequest) (*GetVariableValueResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetVariableValue not implemented")
+}
+func (UnimplementedVarletServiceServer) StartActuation(context.Context, *StartActuationRequest) (*StartActuationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StartActuation not implemented")
 }
 func (UnimplementedVarletServiceServer) GetDependencyGraph(context.Context, *GetDependencyGraphRequest) (*GetDependencyGraphResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetDependencyGraph not implemented")
@@ -370,6 +386,24 @@ func _VarletService_GetVariableValue_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _VarletService_StartActuation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StartActuationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(VarletServiceServer).StartActuation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: VarletService_StartActuation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(VarletServiceServer).StartActuation(ctx, req.(*StartActuationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _VarletService_GetDependencyGraph_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetDependencyGraphRequest)
 	if err := dec(in); err != nil {
@@ -426,6 +460,10 @@ var VarletService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetVariableValue",
 			Handler:    _VarletService_GetVariableValue_Handler,
+		},
+		{
+			MethodName: "StartActuation",
+			Handler:    _VarletService_StartActuation_Handler,
 		},
 		{
 			MethodName: "GetDependencyGraph",

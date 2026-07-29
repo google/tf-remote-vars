@@ -1457,7 +1457,7 @@ func TestWebhookPropagation(t *testing.T) {
 	}
 
 	numExpected := len(expected)
-	timeout := time.After(2 * time.Second)
+	timeout := time.After(5 * time.Second)
 	for i := 0; i < numExpected; i++ {
 		select {
 		case event := <-received:
@@ -1686,6 +1686,8 @@ func TestWebhookDelayPropagation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to update variable: %v", err)
 	}
+
+	fakeClock.Advance(2 * time.Second)
 
 	select {
 	case event := <-received:
