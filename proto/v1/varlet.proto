@@ -152,6 +152,8 @@ message NamespaceStatusInfo {
   repeated string causal_actuation_uuids = 2;
   string active_actuation_uuid = 3;
   string last_actuation_uuid = 4;
+  int64 active_actuation_start_time = 5;
+  int64 last_actuation_time = 6;
 }
 
 message TraceNode {

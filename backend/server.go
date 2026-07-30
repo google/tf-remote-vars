@@ -1103,7 +1103,7 @@ func (s *Server) propagateAffected(ctx context.Context, sourceNS string, causalU
 	return nil
 }
 
-func (s *Server) hasActuatingAncestor(ns string, actuating map[string]string, upstream map[string][]string) bool {
+func (s *Server) hasActuatingAncestor(ns string, actuating map[string]*activeActuation, upstream map[string][]string) bool {
 	queue := []string{ns}
 	visited := make(map[string]bool)
 	visited[ns] = true
@@ -1197,9 +1197,9 @@ func (s *Server) calculateStatuses(ctx context.Context, namespaces []string) (ma
 	}
 
 	s.mu.Lock()
-	actuatingCopy := make(map[string]string)
+	actuatingCopy := make(map[string]*activeActuation)
 	for k, v := range s.actuating {
-		actuatingCopy[k] = v.uuid
+		actuatingCopy[k] = &activeActuation{uuid: v.uuid, startTime: v.startTime}
 	}
 	succeededCopy := make(map[string]bool)
 	for k, v := range s.succeeded {
@@ -1215,19 +1215,23 @@ func (s *Server) calculateStatuses(ctx context.Context, namespaces []string) (ma
 		}
 
 		var lastActUUID string
+		var lastActTime int64
 		lastAct, err := s.store.GetLastActuation(ctx, ns)
 		if err == nil {
 			lastActUUID = lastAct.UUID
+			lastActTime = lastAct.CreatedAt.Unix()
 		} else if !errors.Is(err, ErrNotFound) {
 			log.Printf("[WARNING] failed to get last actuation for %s: %v", ns, err)
 		}
 
 		statusStr := string(StatusIdle)
 		var activeUUID string
+		var activeStartTime int64
 
-		if uuid, ok := actuatingCopy[ns]; ok {
+		if active, ok := actuatingCopy[ns]; ok {
 			statusStr = string(StatusActuating)
-			activeUUID = uuid
+			activeUUID = active.uuid
+			activeStartTime = active.startTime.Unix()
 		} else if len(causalUUIDs) > 0 {
 			statusStr = string(StatusAffected)
 		} else {
@@ -1239,10 +1243,12 @@ func (s *Server) calculateStatuses(ctx context.Context, namespaces []string) (ma
 		}
 
 		statuses[ns] = &pb.NamespaceStatusInfo{
-			Status:               statusStr,
-			CausalActuationUuids: causalUUIDs,
-			ActiveActuationUuid:  activeUUID,
-			LastActuationUuid:    lastActUUID,
+			Status:                   statusStr,
+			CausalActuationUuids:     causalUUIDs,
+			ActiveActuationUuid:      activeUUID,
+			LastActuationUuid:        lastActUUID,
+			ActiveActuationStartTime: activeStartTime,
+			LastActuationTime:        lastActTime,
 		}
 	}
 	return statuses, nil

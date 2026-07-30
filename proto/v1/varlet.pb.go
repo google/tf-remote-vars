@@ -1135,13 +1135,15 @@ func (x *GetDependencyGraphResponse) GetStatuses() map[string]*NamespaceStatusIn
 }
 
 type NamespaceStatusInfo struct {
-	state                protoimpl.MessageState `protogen:"open.v1"`
-	Status               string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
-	CausalActuationUuids []string               `protobuf:"bytes,2,rep,name=causal_actuation_uuids,json=causalActuationUuids,proto3" json:"causal_actuation_uuids,omitempty"`
-	ActiveActuationUuid  string                 `protobuf:"bytes,3,opt,name=active_actuation_uuid,json=activeActuationUuid,proto3" json:"active_actuation_uuid,omitempty"`
-	LastActuationUuid    string                 `protobuf:"bytes,4,opt,name=last_actuation_uuid,json=lastActuationUuid,proto3" json:"last_actuation_uuid,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	state                    protoimpl.MessageState `protogen:"open.v1"`
+	Status                   string                 `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
+	CausalActuationUuids     []string               `protobuf:"bytes,2,rep,name=causal_actuation_uuids,json=causalActuationUuids,proto3" json:"causal_actuation_uuids,omitempty"`
+	ActiveActuationUuid      string                 `protobuf:"bytes,3,opt,name=active_actuation_uuid,json=activeActuationUuid,proto3" json:"active_actuation_uuid,omitempty"`
+	LastActuationUuid        string                 `protobuf:"bytes,4,opt,name=last_actuation_uuid,json=lastActuationUuid,proto3" json:"last_actuation_uuid,omitempty"`
+	ActiveActuationStartTime int64                  `protobuf:"varint,5,opt,name=active_actuation_start_time,json=activeActuationStartTime,proto3" json:"active_actuation_start_time,omitempty"`
+	LastActuationTime        int64                  `protobuf:"varint,6,opt,name=last_actuation_time,json=lastActuationTime,proto3" json:"last_actuation_time,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *NamespaceStatusInfo) Reset() {
@@ -1200,6 +1202,20 @@ func (x *NamespaceStatusInfo) GetLastActuationUuid() string {
 		return x.LastActuationUuid
 	}
 	return ""
+}
+
+func (x *NamespaceStatusInfo) GetActiveActuationStartTime() int64 {
+	if x != nil {
+		return x.ActiveActuationStartTime
+	}
+	return 0
+}
+
+func (x *NamespaceStatusInfo) GetLastActuationTime() int64 {
+	if x != nil {
+		return x.LastActuationTime
+	}
+	return 0
 }
 
 type TraceNode struct {
@@ -1849,12 +1865,14 @@ const file_proto_v1_varlet_proto_rawDesc = "" +
 	"\bstatuses\x18\x03 \x03(\v23.varlet.v1.GetDependencyGraphResponse.StatusesEntryR\bstatuses\x1a[\n" +
 	"\rStatusesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x124\n" +
-	"\x05value\x18\x02 \x01(\v2\x1e.varlet.v1.NamespaceStatusInfoR\x05value:\x028\x01\"\xc7\x01\n" +
+	"\x05value\x18\x02 \x01(\v2\x1e.varlet.v1.NamespaceStatusInfoR\x05value:\x028\x01\"\xb6\x02\n" +
 	"\x13NamespaceStatusInfo\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\tR\x06status\x124\n" +
 	"\x16causal_actuation_uuids\x18\x02 \x03(\tR\x14causalActuationUuids\x122\n" +
 	"\x15active_actuation_uuid\x18\x03 \x01(\tR\x13activeActuationUuid\x12.\n" +
-	"\x13last_actuation_uuid\x18\x04 \x01(\tR\x11lastActuationUuid\"\x8b\x01\n" +
+	"\x13last_actuation_uuid\x18\x04 \x01(\tR\x11lastActuationUuid\x12=\n" +
+	"\x1bactive_actuation_start_time\x18\x05 \x01(\x03R\x18activeActuationStartTime\x12.\n" +
+	"\x13last_actuation_time\x18\x06 \x01(\x03R\x11lastActuationTime\"\x8b\x01\n" +
 	"\tTraceNode\x12\x12\n" +
 	"\x04uuid\x18\x01 \x01(\tR\x04uuid\x12\x1c\n" +
 	"\tnamespace\x18\x02 \x01(\tR\tnamespace\x12\x16\n" +

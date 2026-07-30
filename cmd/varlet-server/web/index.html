@@ -168,6 +168,8 @@
 
     <script>
         let cy = null;
+        let latestData = null;
+        let currentTraceUuid = null;
         let simState = null; // 'idle', 'running'
         let affectedNodes = new Set();
         let potentiallyAffectedNodes = new Set();
@@ -299,6 +301,7 @@
                     return r.json();
                 })
                 .then(data => {
+                    latestData = data;
                     if (!data.namespaces || data.namespaces.length === 0) {
                         showMessage("backend is empty or has no namespaces yet");
                         destroyGraph();
@@ -322,138 +325,8 @@
                 });
         }
 
-        function renderGraph(data) {
-            stopSimulation();
-            destroyGraph();
-
-            const elements = [];
-            
-            // Add nodes
-            if (data.namespaces) {
-                data.namespaces.forEach(ns => {
-                    const statusInfo = data.statuses && data.statuses[ns];
-                    const statusClass = (statusInfo && statusInfo.status) || 'idle';
-                    elements.push({ 
-                        data: { 
-                            id: ns, 
-                            label: ns,
-                            originalStatus: statusClass
-                        },
-                        classes: statusClass
-                    });
-                });
-            }
-
-            // Add edges (data flow: source -> consumer)
-            if (data.edges) {
-                data.edges.forEach((edge, idx) => {
-                    elements.push({
-                        data: {
-                            id: `e_${idx}`,
-                            source: edge.sourceNamespace,
-                            target: edge.consumerNamespace,
-                            label: edge.variableName
-                        }
-                    });
-                });
-            }
-
-            cy = cytoscape({
-                container: document.getElementById('cy'),
-                elements: elements,
-                boxSelectionEnabled: false,
-                autounselectify: true,
-                style: [
-                    {
-                        selector: 'node',
-                        style: {
-                            'background-color': '#888',
-                            'label': 'data(label)',
-                            'text-valign': 'center',
-                            'color': '#fff',
-                            'width': '100px',
-                            'height': '40px',
-                            'shape': 'round-rectangle',
-                            'font-size': '12px'
-                        }
-                    },
-                    {
-                        selector: 'edge',
-                        style: {
-                            'width': 2,
-                            'line-color': '#ccc',
-                            'target-arrow-color': '#ccc',
-                            'target-arrow-shape': 'triangle',
-                            'curve-style': 'bezier',
-                            'label': 'data(label)',
-                            'font-size': '10px',
-                            'text-rotation': 'autorotate',
-                            'text-margin-y': -10
-                        }
-                    },
-                    // Simulation styles
-                    {
-                        selector: 'node.affected',
-                        style: { 'background-color': '#ffa500', 'line-color': '#ffa500' }
-                    },
-                    {
-                        selector: 'node.potentially-affected',
-                        style: { 'background-color': '#add8e6', 'color': '#000' }
-                    },
-                    {
-                        selector: 'node.actuating',
-                        style: { 'background-color': '#ffff00', 'color': '#000' }
-                    },
-                    {
-                        selector: 'node.succeeded',
-                        style: { 'background-color': '#90ee90', 'color': '#000' }
-                    },
-                    // Trace highlighting styles
-                    {
-                        selector: 'node.highlighted-trace',
-                        style: {
-                            'border-width': '4px',
-                            'border-color': '#ff4500',
-                            'opacity': 1
-                        }
-                    },
-                    {
-                        selector: 'edge.highlighted-trace',
-                        style: {
-                            'width': 4,
-                            'line-color': '#ff4500',
-                            'target-arrow-color': '#ff4500',
-                            'opacity': 1
-                        }
-                    },
-                    {
-                        selector: 'node.faded-trace',
-                        style: {
-                            'opacity': 0.3
-                        }
-                    },
-                    {
-                        selector: 'edge.faded-trace',
-                        style: {
-                            'opacity': 0.1
-                        }
-                    },
-                    {
-                        selector: 'node.active-node',
-                        style: {
-                            'border-width': '4px',
-                            'border-color': '#007bff'
-                        }
-                    }
-                ],
-                layout: {
-                    name: 'dagre',
-                    nodeSep: 50,
-                    edgeSep: 10,
-                    rankSep: 100,
-                    rankDir: 'TB'
-                }
-            });
+        function setupEventHandlers() {
+            if (!cy) return;
 
             // Right click or long press to start simulation
             cy.on('cxttap', 'node', function(evt){
@@ -471,9 +344,246 @@
             cy.on('tap', 'node', function(evt){
                 const node = evt.target;
                 const ns = node.id();
-                const statusInfo = data.statuses && data.statuses[ns];
+                const statusInfo = latestData && latestData.statuses && latestData.statuses[ns];
                 showNodeDetails(ns, statusInfo);
             });
+        }
+
+        function updateGraphElements(data) {
+            if (!cy) return;
+
+            let structureChanged = false;
+            const currentNodes = cy.nodes();
+            const currentEdges = cy.edges();
+
+            const newNamespaceSet = new Set(data.namespaces || []);
+            
+            // Remove nodes that are no longer present
+            currentNodes.forEach(node => {
+                if (!newNamespaceSet.has(node.id())) {
+                    cy.remove(node);
+                    structureChanged = true;
+                }
+            });
+
+            // Add or update nodes
+            if (data.namespaces) {
+                data.namespaces.forEach(ns => {
+                    const statusInfo = data.statuses && data.statuses[ns];
+                    const statusClass = (statusInfo && statusInfo.status) || 'idle';
+                    
+                    const existingNode = cy.getElementById(ns);
+                    if (existingNode.length > 0) {
+                        existingNode.data('originalStatus', statusClass);
+                        
+                        if (simState === null) {
+                            // Update class if it changed
+                            if (!existingNode.hasClass(statusClass)) {
+                                const hadHighlighted = existingNode.hasClass('highlighted-trace');
+                                const hadFaded = existingNode.hasClass('faded-trace');
+                                const hadActive = existingNode.hasClass('active-node');
+                                
+                                existingNode.removeClass('idle affected potentially-affected actuating succeeded');
+                                existingNode.addClass(statusClass);
+                                
+                                if (hadHighlighted) existingNode.addClass('highlighted-trace');
+                                if (hadFaded) existingNode.addClass('faded-trace');
+                                if (hadActive) existingNode.addClass('active-node');
+                            }
+                        }
+                    } else {
+                        cy.add({
+                            data: {
+                                id: ns,
+                                label: ns,
+                                originalStatus: statusClass
+                            },
+                            classes: statusClass
+                        });
+                        structureChanged = true;
+                    }
+                });
+            }
+
+            // Update edges
+            const newEdges = data.edges || [];
+            const newEdgeIds = new Set();
+            
+            newEdges.forEach(edge => {
+                const edgeId = `e_${edge.sourceNamespace}_${edge.consumerNamespace}_${edge.variableName}`;
+                newEdgeIds.add(edgeId);
+                
+                const existingEdge = cy.getElementById(edgeId);
+                if (existingEdge.length === 0) {
+                    cy.add({
+                        data: {
+                            id: edgeId,
+                            source: edge.sourceNamespace,
+                            target: edge.consumerNamespace,
+                            label: edge.variableName
+                        }
+                    });
+                    structureChanged = true;
+                }
+            });
+            
+            // Remove old edges
+            currentEdges.forEach(edge => {
+                if (!newEdgeIds.has(edge.id())) {
+                    cy.remove(edge);
+                    structureChanged = true;
+                }
+            });
+
+            if (structureChanged) {
+                cy.layout({
+                    name: 'dagre',
+                    nodeSep: 50,
+                    edgeSep: 10,
+                    rankSep: 100,
+                    rankDir: 'TB'
+                }).run();
+            }
+        }
+
+        function renderGraph(data) {
+            stopSimulation();
+
+            if (!cy) {
+                const elements = [];
+                
+                // Add nodes
+                if (data.namespaces) {
+                    data.namespaces.forEach(ns => {
+                        const statusInfo = data.statuses && data.statuses[ns];
+                        const statusClass = (statusInfo && statusInfo.status) || 'idle';
+                        elements.push({ 
+                            data: { 
+                                id: ns, 
+                                label: ns,
+                                originalStatus: statusClass
+                            },
+                            classes: statusClass
+                        });
+                    });
+                }
+
+                // Add edges
+                if (data.edges) {
+                    data.edges.forEach((edge) => {
+                        const edgeId = `e_${edge.sourceNamespace}_${edge.consumerNamespace}_${edge.variableName}`;
+                        elements.push({
+                            data: {
+                                id: edgeId,
+                                source: edge.sourceNamespace,
+                                target: edge.consumerNamespace,
+                                label: edge.variableName
+                            }
+                        });
+                    });
+                }
+
+                cy = cytoscape({
+                    container: document.getElementById('cy'),
+                    elements: elements,
+                    boxSelectionEnabled: false,
+                    autounselectify: true,
+                    style: [
+                        {
+                            selector: 'node',
+                            style: {
+                                'background-color': '#888',
+                                'label': 'data(label)',
+                                'text-valign': 'center',
+                                'color': '#fff',
+                                'width': '100px',
+                                'height': '40px',
+                                'shape': 'round-rectangle',
+                                'font-size': '12px'
+                            }
+                        },
+                        {
+                            selector: 'edge',
+                            style: {
+                                'width': 2,
+                                'line-color': '#ccc',
+                                'target-arrow-color': '#ccc',
+                                'target-arrow-shape': 'triangle',
+                                'curve-style': 'bezier',
+                                'label': 'data(label)',
+                                'font-size': '10px',
+                                'text-rotation': 'autorotate',
+                                'text-margin-y': -10
+                            }
+                        },
+                        // Simulation styles
+                        {
+                            selector: 'node.affected',
+                            style: { 'background-color': '#ffa500', 'line-color': '#ffa500' }
+                        },
+                        {
+                            selector: 'node.potentially-affected',
+                            style: { 'background-color': '#add8e6', 'color': '#000' }
+                        },
+                        {
+                            selector: 'node.actuating',
+                            style: { 'background-color': '#ffff00', 'color': '#000' }
+                        },
+                        {
+                            selector: 'node.succeeded',
+                            style: { 'background-color': '#90ee90', 'color': '#000' }
+                        },
+                        // Trace highlighting styles
+                        {
+                            selector: 'node.highlighted-trace',
+                            style: {
+                                'border-width': '4px',
+                                'border-color': '#ff4500',
+                                'opacity': 1
+                            }
+                        },
+                        {
+                            selector: 'edge.highlighted-trace',
+                            style: {
+                                'width': 4,
+                                'line-color': '#ff4500',
+                                'target-arrow-color': '#ff4500',
+                                'opacity': 1
+                            }
+                        },
+                        {
+                            selector: 'node.faded-trace',
+                            style: {
+                                'opacity': 0.3
+                            }
+                        },
+                        {
+                            selector: 'edge.faded-trace',
+                            style: {
+                                'opacity': 0.1
+                            }
+                        },
+                        {
+                            selector: 'node.active-node',
+                            style: {
+                                'border-width': '4px',
+                                'border-color': '#007bff'
+                            }
+                        }
+                    ],
+                    layout: {
+                        name: 'dagre',
+                        nodeSep: 50,
+                        edgeSep: 10,
+                        rankSep: 100,
+                        rankDir: 'TB'
+                    }
+                });
+
+                setupEventHandlers();
+            } else {
+                updateGraphElements(data);
+            }
 
             // Handle initial selected node from URL
             const urlParams = new URLSearchParams(window.location.search);
@@ -615,10 +725,12 @@
             `;
 
             if (statusInfo.activeActuationUuid) {
-                html += `<p>Active Actuation: <span style="font-family: monospace; font-size: 0.9em;">${statusInfo.activeActuationUuid}</span></p>`;
+                const activeTime = (statusInfo.activeActuationStartTime && parseInt(statusInfo.activeActuationStartTime) > 0) ? new Date(parseInt(statusInfo.activeActuationStartTime) * 1000).toISOString() : 'unknown';
+                html += `<p>Active Actuation: <span style="font-family: monospace; font-size: 0.9em;">${statusInfo.activeActuationUuid}</span><br/><span style="font-size: 0.8em; color: #888;">Started: ${activeTime}</span></p>`;
             }
             if (statusInfo.lastActuationUuid) {
-                html += `<p>Last Actuation: <span style="font-family: monospace; font-size: 0.9em;">${statusInfo.lastActuationUuid}</span></p>`;
+                const lastTime = (statusInfo.lastActuationTime && parseInt(statusInfo.lastActuationTime) > 0) ? new Date(parseInt(statusInfo.lastActuationTime) * 1000).toISOString() : 'unknown';
+                html += `<p>Last Actuation: <span style="font-family: monospace; font-size: 0.9em;">${statusInfo.lastActuationUuid}</span><br/><span style="font-size: 0.8em; color: #888;">Started: ${lastTime}</span></p>`;
             }
 
             const hasCausal = statusInfo.causalActuationUuids && statusInfo.causalActuationUuids.length > 0;
@@ -653,7 +765,11 @@
         }
 
         function visualizeTrace(uuid) {
+            if (currentTraceUuid === uuid) {
+                return;
+            }
             clearTraceHighlighting();
+            currentTraceUuid = uuid;
             
             fetch(`/api/trace?uuid=${uuid}`)
                 .then(r => {
@@ -666,6 +782,7 @@
                 })
                 .catch(err => {
                     alert(err.message);
+                    currentTraceUuid = null;
                 });
         }
 
@@ -707,6 +824,7 @@
         }
 
         function clearTraceHighlighting() {
+            currentTraceUuid = null;
             if (cy) {
                 cy.elements().removeClass('highlighted-trace faded-trace');
             }
@@ -739,7 +857,7 @@
             }
 
             sortedNodes.forEach((node, idx) => {
-                const dt = new Date(node.timestamp * 1000).toLocaleString();
+                const dt = (node.timestamp && parseInt(node.timestamp) > 0) ? new Date(parseInt(node.timestamp) * 1000).toISOString() : 'unknown';
                 html += `
                     <div class="trace-step">
                         <strong>${node.namespace}</strong> (${node.source})<br/>

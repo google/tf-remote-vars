@@ -78,21 +78,47 @@ CGO_ENABLED=0 go build -o varlet-server ./cmd/varlet-server
 CGO_ENABLED=0 go build -o terraform-provider-varlet ./cmd/terraform-provider-varlet
 ```
 
-### 2. Configure Terraform Developer Overrides
+### 2. Configure Terraform Developer Overrides & Local Mirror
 
-Since this is a local provider, you must configure a Terraform developer override so Terraform finds the local binary instead of pulling from the registry.
+Since this is a local provider that is not published to the public Terraform registry, you must configure a Terraform developer override so Terraform finds the local binary.
 
-Create or edit your `~/.terraformrc` file and add the following:
+Additionally, because the examples use other public providers (like `time` and `null`), you must run `terraform init` to download them. To prevent `terraform init` from failing when it tries to query the registry for `google/varlet`, you must also set up a local filesystem mirror.
+
+#### Step 2a: Create the Local Mirror Directory
+Create a directory structure that mimics a registry structure and symlink your compiled provider binary into it:
+
+```bash
+# Create the mirror directory structure (example for Linux AMD64)
+mkdir -p ~/.terraform-mirror/registry.terraform.io/google/varlet/1.0.0/linux_amd64
+
+# Symlink the compiled provider binary
+ln -s /path/to/tf-remote-vars/terraform-provider-varlet ~/.terraform-mirror/registry.terraform.io/google/varlet/1.0.0/linux_amd64/terraform-provider-varlet_v1.0.0
+```
+*(Make sure to replace `/path/to/tf-remote-vars` with the absolute path to your repository directory where the `terraform-provider-varlet` binary was built).*
+
+#### Step 2b: Configure `~/.terraformrc`
+Create or edit your `~/.terraformrc` file to configure both the developer override (for running) and the filesystem mirror (to allow `init` to succeed):
 
 ```hcl
 provider_installation {
+  # Directs Terraform to use the local binary directly for plan/apply
   dev_overrides {
     "google/varlet" = "/path/to/tf-remote-vars"
   }
-  direct {}
+
+  # Allows 'terraform init' to satisfy the google/varlet dependency locally
+  filesystem_mirror {
+    path    = "/path/to/your/home/.terraform-mirror"
+    include = ["google/varlet"]
+  }
+
+  # Directs Terraform to download all other providers from the public registry
+  direct {
+    exclude = ["google/varlet"]
+  }
 }
 ```
-*(Make sure to replace the path with the absolute path to your repository directory where the `terraform-provider-varlet` binary was built).*
+*(Make sure to replace `/path/to/tf-remote-vars` and `/path/to/your/home` with your actual absolute paths. Terraform does not expand `~` in the `path` attribute).*
 
 ### 3. Start the Varlet Server
 
@@ -107,57 +133,80 @@ Start the server. By default, this starts a gRPC server on port `8080` (for Terr
 Actuate the stacks in order of their dependencies. Since we have a delayed webhook, we can simulate manual actuation here. Open a separate terminal and apply them sequentially:
 
 ```bash
-export TF_CLI_CONFIG_FILE="$HOME/.terraformrc"
+DEMO_SH=$(mktemp)
+
+cat > ${DEMO_SH} << __END__
+
+export SUFFIX=\$(date --utc +"%Y%m%d-%H%m%S")
+export TF_CLI_CONFIG_FILE="\${HOME}/.terraformrc"
+
+export BOOTSTRAP_UUID=\$(uuidgen)
+export POLICY_ENGINE_UUID=\$(uuidgen)
+export TAGGING_UUID=\$(uuidgen)
+export SEC_TIER_1_UUID=\$(uuidgen)
+export SEC_TIER_2_UUID=\$(uuidgen)
+export LOCKDOWN_UUID=\$(uuidgen)
+export ZONE_US_UUID=\$(uuidgen)
+export ZONE_EU_UUID=\$(uuidgen)
+export ZONE_AP_UUID=\$(uuidgen)
+
+# 0. For local development, remove the locks
+find \$(pwd)/examples/multi-stack-deployment -name ".terraform.lock.hcl" -exec rm -f {} \;
 
 # 1. Apply Bootstrap
-pushd examples/multi-stack-deployment/bootstrap
-terraform init
-terraform apply -auto-approve
+pushd \$(pwd)/examples/multi-stack-deployment/bootstrap
+terraform init -upgrade
+VARLET_ACTUATION_UUID=\${BOOTSTRAP_UUID} terraform apply -auto-approve -var="suffix=\${SUFFIX}"
 popd
 
 # 2. Apply Policy Engine & Tagging Service (parallel or order doesn't matter)
-pushd examples/multi-stack-deployment/policy_engine
-terraform init
-terraform apply -auto-approve
+pushd \$(pwd)/examples/multi-stack-deployment/policy_engine
+terraform init -upgrade
+VARLET_ACTUATION_UUID=\${POLICY_ENGINE_UUID} VARLET_UPSTREAM_ACTUATION_UUIDS=\${BOOTSTRAP_UUID} terraform apply -auto-approve -var="suffix=\${SUFFIX}"
 popd
 
-pushd examples/multi-stack-deployment/tagging_service
-terraform init
-terraform apply -auto-approve
+pushd \$(pwd)/examples/multi-stack-deployment/tagging_service
+terraform init -upgrade
+VARLET_ACTUATION_UUID=\${TAGGING_UUID} VARLET_UPSTREAM_ACTUATION_UUIDS=\${BOOTSTRAP_UUID} terraform apply -auto-approve -var="suffix=\${SUFFIX}"
 popd
 
 # 3. Apply Security Tier 1 & 2
-pushd examples/multi-stack-deployment/security_tier_1
-terraform init
-terraform apply -auto-approve
+pushd \$(pwd)/examples/multi-stack-deployment/security_tier_1
+terraform init -upgrade
+VARLET_ACTUATION_UUID=\${SEC_TIER_1_UUID} VARLET_UPSTREAM_ACTUATION_UUIDS=\${TAGGING_UUID} terraform apply -auto-approve -var="suffix=\${SUFFIX}"
 popd
 
-pushd examples/multi-stack-deployment/security_tier_2
-terraform init
-terraform apply -auto-approve
+pushd \$(pwd)/examples/multi-stack-deployment/security_tier_2
+terraform init -upgrade
+VARLET_ACTUATION_UUID=\${SEC_TIER_2_UUID} VARLET_UPSTREAM_ACTUATION_UUIDS=\${TAGGING_UUID} terraform apply -auto-approve -var="suffix=\${SUFFIX}"
 popd
 
 # 4. Apply Lockdown Enforcer
-pushd examples/multi-stack-deployment/lockdown_enforcer
-terraform init
-terraform apply -auto-approve
+pushd \$(pwd)/examples/multi-stack-deployment/lockdown_enforcer
+terraform init -upgrade
+VARLET_ACTUATION_UUID=\${LOCKDOWN_UUID} VARLET_UPSTREAM_ACTUATION_UUIDS=\${BOOTSTRAP_UUID},\${SEC_TIER_1_UUID},\${SEC_TIER_2_UUID},\${POLICY_ENGINE_UUID} terraform apply -auto-approve
 popd
 
 # 5. Apply Regional Zones (US, EU, AP)
-pushd examples/multi-stack-deployment/regional_landing_zones/zone_us
-terraform init
-terraform apply -auto-approve
+pushd \$(pwd)/examples/multi-stack-deployment/regional_landing_zones/zone_us
+terraform init -upgrade
+VARLET_ACTUATION_UUID=\${ZONE_US_UUID} VARLET_UPSTREAM_ACTUATION_UUIDS=\${LOCKDOWN_UUID} terraform apply -auto-approve
 popd
 
-pushd examples/multi-stack-deployment/zone_eu
-terraform init
-terraform apply -auto-approve
+pushd \$(pwd)/examples/multi-stack-deployment/regional_landing_zones/zone_eu
+terraform init -upgrade
+VARLET_ACTUATION_UUID=\${ZONE_EU_UUID} VARLET_UPSTREAM_ACTUATION_UUIDS=\${LOCKDOWN_UUID} terraform apply -auto-approve
 popd
 
-pushd examples/multi-stack-deployment/zone_ap
-terraform init
-terraform apply -auto-approve
+pushd \$(pwd)/examples/multi-stack-deployment/regional_landing_zones/zone_ap
+terraform init -upgrade
+VARLET_ACTUATION_UUID=\${ZONE_AP_UUID} VARLET_UPSTREAM_ACTUATION_UUIDS=\${LOCKDOWN_UUID} terraform apply -auto-approve
 popd
+__END__
+
+echo "Demo script in '${DEMO_SH}'"
+
+sh ${DEMO_SH}
 ```
 
 ### 5. Inspect the Web UI
