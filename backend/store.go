@@ -216,7 +216,7 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		uuid TEXT PRIMARY KEY,
 		namespace TEXT NOT NULL,
 		source TEXT NOT NULL,
-		status TEXT NOT NULL,
+		status TEXT NOT NULL DEFAULT 'active',
 		completion_notified INTEGER DEFAULT 0,
 		created_at DATETIME NOT NULL,
 		FOREIGN KEY (namespace) REFERENCES namespaces(name) ON DELETE CASCADE

@@ -26,6 +26,7 @@ func main() {
 	grpcPort := flag.Int("grpc-port", 8080, "Port for gRPC server")
 	httpPort := flag.Int("http-port", 8081, "Port for HTTP server/UI")
 	dbPath := flag.String("db-path", "varlet.db", "Path to SQLite database")
+	maxActuationAgeDays := flag.Int("max-actuation-age-days", 3, "Maximum age of actuations in days before they are marked stale")
 	flag.Parse()
 
 	// Initialize store
@@ -37,6 +38,7 @@ func main() {
 
 	// Initialize server logic
 	serverLogic := backend.NewServer(store)
+	serverLogic.SetMaxActuationAgeDays(*maxActuationAgeDays)
 
 	// Start gRPC server
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", *grpcPort))

@@ -2194,19 +2194,6 @@ func TestCompletionHookRegistry(t *testing.T) {
 		}
 	}
 
-	// Try registering invalid URL
-	_, err = server.RegisterCompletionHook(ctx, &pb.RegisterCompletionHookRequest{
-		Url: "invalid-url",
-	})
-	if err == nil {
-		t.Errorf("expected error registering invalid URL, got nil")
-	} else {
-		st, ok := status.FromError(err)
-		if !ok || st.Code() != codes.InvalidArgument {
-			t.Errorf("expected InvalidArgument error, got: %v", err)
-		}
-	}
-
 	// Deregister hook
 	_, err = server.DeregisterCompletionHook(ctx, &pb.DeregisterCompletionHookRequest{
 		Url: "http://example.com/hook",
@@ -2222,6 +2209,27 @@ func TestCompletionHookRegistry(t *testing.T) {
 	}
 	if len(listResp.GetUrls()) != 1 || listResp.GetUrls()[0] != "https://foo.bar/callback" {
 		t.Errorf("expected only 'https://foo.bar/callback', got %v", listResp.GetUrls())
+	}
+}
+
+func TestCompletionHookRegistryError(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := newTestStore(t)
+	server := NewServer(store)
+	t.Cleanup(server.Stop)
+
+	// Try registering invalid URL
+	_, err := server.RegisterCompletionHook(ctx, &pb.RegisterCompletionHookRequest{
+		Url: "invalid-url",
+	})
+	if err == nil {
+		t.Errorf("expected error registering invalid URL, got nil")
+	} else {
+		st, ok := status.FromError(err)
+		if !ok || st.Code() != codes.InvalidArgument {
+			t.Errorf("expected InvalidArgument error, got: %v", err)
+		}
 	}
 }
 

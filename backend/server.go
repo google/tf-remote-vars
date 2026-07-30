@@ -97,6 +97,13 @@ func (s *Server) SetMaxActuationAgeDays(days int) {
 	s.maxActuationAgeDays = days
 }
 
+func (s *Server) maxActuationAge() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return time.Duration(s.maxActuationAgeDays) * 24 * time.Hour
+}
+
+
 
 // Stop stops the background workers.
 func (s *Server) Stop() {
@@ -1308,9 +1315,7 @@ func (s *Server) processCompletionHooks(ctx context.Context) {
 	}
 
 	now := s.clock.Now()
-	s.mu.Lock()
-	maxAge := time.Duration(s.maxActuationAgeDays) * 24 * time.Hour
-	s.mu.Unlock()
+	maxAge := s.maxActuationAge()
 
 	var completed []CompletedActuation
 
@@ -1377,9 +1382,7 @@ func (s *Server) processCompletionHooks(ctx context.Context) {
 
 func (s *Server) transitionStaleRootActuations(ctx context.Context, roots []*Actuation) {
 	now := s.clock.Now()
-	s.mu.Lock()
-	maxAge := time.Duration(s.maxActuationAgeDays) * 24 * time.Hour
-	s.mu.Unlock()
+	maxAge := s.maxActuationAge()
 
 	for _, r := range roots {
 		age := now.Sub(r.CreatedAt)
