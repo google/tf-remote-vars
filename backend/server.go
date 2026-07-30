@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"slices"
 	"sync"
 	"time"
 
@@ -667,14 +668,7 @@ func (s *Server) GetDependencyGraph(ctx context.Context, req *pb.GetDependencyGr
 		}, nil
 	}
 
-	foundRoot := false
-	for _, ns := range allNS {
-		if ns == rootNS {
-			foundRoot = true
-			break
-		}
-	}
-	if !foundRoot {
+	if !slices.Contains(allNS, rootNS) {
 		return nil, status.Errorf(codes.NotFound, "root namespace %q not found", rootNS)
 	}
 
@@ -1057,17 +1051,8 @@ func (s *Server) debounceSucceeded(ns string, varName string, changed bool, actU
 		for u := range state.actuationUUIDs {
 			causalUUIDs = append(causalUUIDs, u)
 		}
-		if currentActUUID != "" {
-			found := false
-			for _, u := range causalUUIDs {
-				if u == currentActUUID {
-					found = true
-					break
-				}
-			}
-			if !found {
-				causalUUIDs = append(causalUUIDs, currentActUUID)
-			}
+		if currentActUUID != "" && !slices.Contains(causalUUIDs, currentActUUID) {
+			causalUUIDs = append(causalUUIDs, currentActUUID)
 		}
 		
 		delete(s.debounceTimers, ns)
