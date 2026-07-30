@@ -144,7 +144,7 @@ func (s *Server) RegisterNamespace(ctx context.Context, req *pb.RegisterNamespac
 	}
 
 	uuidStr := uuid.New().String()
-	s.markActuating(ctx, ns.Name, uuidStr)
+	s.markActuating(ns.Name, uuidStr)
 
 	act := &Actuation{
 		UUID:      uuidStr,
@@ -173,7 +173,7 @@ func (s *Server) StartActuation(ctx context.Context, req *pb.StartActuationReque
 		uuidStr = uuid.New().String()
 	}
 
-	s.markActuating(ctx, ns, uuidStr)
+	s.markActuating(ns, uuidStr)
 
 	act := &Actuation{
 		UUID:      uuidStr,
@@ -1006,18 +1006,14 @@ func AuditInterceptor(store Store, clock clockwork.Clock) grpc.UnaryServerInterc
 	}
 }
 
-func (s *Server) markActuating(ctx context.Context, ns string, uuid string) {
+func (s *Server) markActuating(ns string, uuid string) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.actuating[ns] = &activeActuation{
 		uuid:      uuid,
 		startTime: s.clock.Now(),
 	}
 	delete(s.succeeded, ns)
-	s.mu.Unlock()
-
-	if err := s.store.ClearAffectedNamespace(ctx, ns); err != nil {
-		log.Printf("[WARNING] failed to clear affected namespaces for %s: %v", ns, err)
-	}
 }
 
 func (s *Server) debounceSucceeded(ns string, varName string, changed bool, actUUID string) {

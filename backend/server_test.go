@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -2245,32 +2244,8 @@ func TestCompletionHookCascadeNotification(t *testing.T) {
 	server.SetMaxActuationAgeDays(1)
 
 	// Setup a mock callback HTTP server
-	type hookEvent struct {
-		UUID   string
-		Status string
-	}
-	received := make(chan []hookEvent, 10)
-
-	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload struct {
-			Completed []struct {
-				UUID   string `json:"uuid"`
-				Status string `json:"status"`
-			} `json:"completed_actuations"`
-		}
-		log.Printf("[DEBUG] mock completion hook server received request: %s %s", r.Method, r.URL.Path)
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			log.Printf("[DEBUG] mock completion hook server decode failed: %v", err)
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		var events []hookEvent
-		for _, c := range payload.Completed {
-			events = append(events, hookEvent{UUID: c.UUID, Status: c.Status})
-		}
-		received <- events
-		w.WriteHeader(http.StatusOK)
-	}))
+	received := make(chan []completionHookEvent, 10)
+	testServer := startMockCompletionHookServer(t, received)
 	defer testServer.Close()
 
 
@@ -2441,30 +2416,8 @@ func TestCompletionHookStaleNotification(t *testing.T) {
 	// Set short max age (1 day)
 	server.SetMaxActuationAgeDays(1)
 
-	type hookEvent struct {
-		UUID   string
-		Status string
-	}
-	received := make(chan []hookEvent, 10)
-
-	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload struct {
-			Completed []struct {
-				UUID   string `json:"uuid"`
-				Status string `json:"status"`
-			} `json:"completed_actuations"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		var events []hookEvent
-		for _, c := range payload.Completed {
-			events = append(events, hookEvent{UUID: c.UUID, Status: c.Status})
-		}
-		received <- events
-		w.WriteHeader(http.StatusOK)
-	}))
+	received := make(chan []completionHookEvent, 10)
+	testServer := startMockCompletionHookServer(t, received)
 	defer testServer.Close()
 
 	// Register hook URL
@@ -2506,7 +2459,29 @@ func TestCompletionHookStaleNotification(t *testing.T) {
 	}
 }
 
+type completionHookEvent struct {
+	UUID   string
+	Status string
+}
 
-
-
-
+func startMockCompletionHookServer(t *testing.T, received chan<- []completionHookEvent) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Completed []struct {
+				UUID   string `json:"uuid"`
+				Status string `json:"status"`
+			} `json:"completed_actuations"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("failed to decode completion hook payload: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var events []completionHookEvent
+		for _, c := range payload.Completed {
+			events = append(events, completionHookEvent{UUID: c.UUID, Status: c.Status})
+		}
+		received <- events
+		w.WriteHeader(http.StatusOK)
+	}))
+}

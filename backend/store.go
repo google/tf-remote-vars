@@ -715,6 +715,12 @@ func (s *SQLiteStore) CreateActuation(ctx context.Context, act *Actuation, paren
 		}
 	}
 
+	// Clear affected namespace in DB atomically to prevent race condition during cascade completion evaluation
+	_, err = tx.ExecContext(ctx, "DELETE FROM affected_namespaces WHERE namespace = ?", act.Namespace)
+	if err != nil {
+		return fmt.Errorf("failed to clear affected namespaces: %w", err)
+	}
+
 	return tx.Commit()
 }
 
