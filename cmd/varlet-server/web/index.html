@@ -28,10 +28,12 @@
             flex-grow: 1;
             min-height: 0;
             position: relative;
+            width: 100%;
         }
         #cy {
             flex-grow: 1;
             height: 100%;
+            min-width: 0;
         }
         #sidebar {
             width: 350px;
@@ -171,6 +173,23 @@
         let potentiallyAffectedNodes = new Set();
         let actuatedNodes = new Set();
 
+        function destroyGraph() {
+            if (cy) {
+                cy.destroy();
+                cy = null;
+            }
+        }
+
+        function setSidebarVisible(visible) {
+            document.body.classList.toggle('sidebar-open', visible);
+            setTimeout(() => {
+                if (cy) {
+                    cy.resize();
+                    cy.fit();
+                }
+            }, 50);
+        }
+
         document.getElementById('fetch-btn').addEventListener('click', () => {
             fetchGraph(true);
             if (document.getElementById('auto-refresh').checked) {
@@ -222,10 +241,20 @@
             fetchGraph(false);
         });
 
-        function updateURL(root, depth) {
+        function updateURL(selectedNode) {
+            const root = document.getElementById('root-ns').value;
+            const depth = document.getElementById('upstream-depth').value;
+            
+            let node = selectedNode;
+            if (node === undefined) {
+                const urlParams = new URLSearchParams(window.location.search);
+                node = urlParams.get('selected_node');
+            }
+
             const params = new URLSearchParams();
             if (root) params.set('root', root);
             if (depth) params.set('upstream_depth', depth);
+            if (node) params.set('selected_node', node);
             const queryString = params.toString();
             const newUrl = window.location.pathname + (queryString ? '?' + queryString : '');
             if (window.location.search !== (queryString ? '?' + queryString : '')) {
@@ -272,15 +301,12 @@
                 .then(data => {
                     if (!data.namespaces || data.namespaces.length === 0) {
                         showMessage("backend is empty or has no namespaces yet");
-                        if (cy) {
-                            cy.destroy();
-                            cy = null;
-                        }
+                        destroyGraph();
                     } else {
                         renderGraph(data);
                     }
                     if (pushHistory) {
-                        updateURL(root, depth);
+                        updateURL();
                     }
                 })
                 .catch(err => {
@@ -289,25 +315,16 @@
                     } else {
                         showMessage('Failed to fetch graph: ' + (err.message || err));
                     }
-                    if (cy) {
-                        cy.destroy();
-                        cy = null;
-                    }
+                    destroyGraph();
                     if (pushHistory) {
-                        updateURL(root, depth);
+                        updateURL();
                     }
                 });
         }
 
         function renderGraph(data) {
-            console.log("renderGraph called", data);
             stopSimulation();
-
-            if (cy) {
-                console.log("Destroying old Cytoscape instance");
-                cy.destroy();
-                cy = null;
-            }
+            destroyGraph();
 
             const elements = [];
             
@@ -317,7 +334,11 @@
                     const statusInfo = data.statuses && data.statuses[ns];
                     const statusClass = (statusInfo && statusInfo.status) || 'idle';
                     elements.push({ 
-                        data: { id: ns, label: ns },
+                        data: { 
+                            id: ns, 
+                            label: ns,
+                            originalStatus: statusClass
+                        },
                         classes: statusClass
                     });
                 });
@@ -337,7 +358,6 @@
                 });
             }
 
-            console.log("Initializing Cytoscape with elements:", elements);
             cy = cytoscape({
                 container: document.getElementById('cy'),
                 elements: elements,
@@ -394,7 +414,7 @@
                         style: {
                             'border-width': '4px',
                             'border-color': '#ff4500',
-                            'background-color': '#ff6347'
+                            'opacity': 1
                         }
                     },
                     {
@@ -402,7 +422,27 @@
                         style: {
                             'width': 4,
                             'line-color': '#ff4500',
-                            'target-arrow-color': '#ff4500'
+                            'target-arrow-color': '#ff4500',
+                            'opacity': 1
+                        }
+                    },
+                    {
+                        selector: 'node.faded-trace',
+                        style: {
+                            'opacity': 0.3
+                        }
+                    },
+                    {
+                        selector: 'edge.faded-trace',
+                        style: {
+                            'opacity': 0.1
+                        }
+                    },
+                    {
+                        selector: 'node.active-node',
+                        style: {
+                            'border-width': '4px',
+                            'border-color': '#007bff'
                         }
                     }
                 ],
@@ -414,8 +454,6 @@
                     rankDir: 'TB'
                 }
             });
-
-            console.log("Cytoscape initialized:", cy);
 
             // Right click or long press to start simulation
             cy.on('cxttap', 'node', function(evt){
@@ -430,14 +468,23 @@
             });
 
             // Click to show details in sidebar
-            console.log("Registering tap listener on nodes");
             cy.on('tap', 'node', function(evt){
                 const node = evt.target;
                 const ns = node.id();
-                console.log("Node tapped:", ns);
                 const statusInfo = data.statuses && data.statuses[ns];
                 showNodeDetails(ns, statusInfo);
             });
+
+            // Handle initial selected node from URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const selectedNode = urlParams.get('selected_node');
+            if (selectedNode && data.namespaces.includes(selectedNode)) {
+                const statusInfo = data.statuses && data.statuses[selectedNode];
+                showNodeDetails(selectedNode, statusInfo, false);
+            } else {
+                setSidebarVisible(false);
+                clearTraceHighlighting();
+            }
         }
 
         function startSimulation(rootNodeId) {
@@ -514,7 +561,13 @@
             document.getElementById('sim-next-btn').disabled = false;
             
             if (cy) {
-                cy.nodes().removeClass('affected potentially-affected actuating succeeded');
+                cy.nodes().forEach(node => {
+                    node.removeClass('affected potentially-affected actuating succeeded');
+                    const originalStatus = node.data('originalStatus');
+                    if (originalStatus) {
+                        node.addClass(originalStatus);
+                    }
+                });
             }
             affectedNodes.clear();
             potentiallyAffectedNodes.clear();
@@ -522,32 +575,32 @@
         }
 
         document.getElementById('close-sidebar-btn').addEventListener('click', () => {
-            document.body.classList.remove('sidebar-open');
+            setSidebarVisible(false);
             if (cy) {
-                cy.resize();
+                cy.nodes().removeClass('active-node');
             }
             clearTraceHighlighting();
+            
+            // Clear selected_node from URL
+            updateURL(null);
         });
 
-        function showNodeDetails(ns, statusInfo) {
-            console.log("showNodeDetails called for:", ns, statusInfo);
-            try {
-                clearTraceHighlighting();
-            } catch (e) {
-                console.error("Failed to clear trace highlighting:", e);
-            }
-            const content = document.getElementById('sidebar-content');
-            document.body.classList.add('sidebar-open');
-            console.log("Body classes:", document.body.className);
-            const sidebarEl = document.getElementById('sidebar');
-            console.log("Sidebar computed display:", window.getComputedStyle(sidebarEl).display);
-            try {
-                console.log("Sidebar offsetWidth:", sidebarEl.offsetWidth, "offsetHeight:", sidebarEl.offsetHeight);
-            } catch (e) {
-                console.log("Failed to get offset dimensions:", e.message);
-            }
+        function showNodeDetails(ns, statusInfo, pushHistory = true) {
+            clearTraceHighlighting();
+            
             if (cy) {
-                cy.resize();
+                cy.nodes().removeClass('active-node');
+                const el = cy.getElementById(ns);
+                if (el) {
+                    el.addClass('active-node');
+                }
+            }
+
+            const content = document.getElementById('sidebar-content');
+            setSidebarVisible(true);
+
+            if (pushHistory) {
+                updateURL(ns);
             }
 
             if (!statusInfo) {
@@ -568,7 +621,8 @@
                 html += `<p>Last Actuation: <span style="font-family: monospace; font-size: 0.9em;">${statusInfo.lastActuationUuid}</span></p>`;
             }
 
-            if (statusInfo.causalActuationUuids && statusInfo.causalActuationUuids.length > 0) {
+            const hasCausal = statusInfo.causalActuationUuids && statusInfo.causalActuationUuids.length > 0;
+            if (hasCausal) {
                 html += `
                     <div class="trace-panel">
                         <h4>Causal Actuations</h4>
@@ -579,15 +633,23 @@
                     html += `<li style="margin: 3px 0;"><a href="#" onclick="visualizeTrace('${uuid}'); return false;" style="font-family: monospace; font-size: 0.9em;">${uuid}</a></li>`;
                 });
                 html += `</ul></div>`;
-            } else if (statusInfo.lastActuationUuid) {
-                html += `
-                    <div class="trace-panel">
-                        <button onclick="visualizeTrace('${statusInfo.lastActuationUuid}'); return false;">Trace Ancestry</button>
-                    </div>
-                `;
+            }
+            
+            if (statusInfo.lastActuationUuid) {
+                if (hasCausal) {
+                    html += `
+                        <div class="trace-panel">
+                            <button onclick="visualizeTrace('${statusInfo.lastActuationUuid}'); return false;">Trace Last Actuation</button>
+                        </div>
+                    `;
+                }
             }
 
             content.innerHTML = html;
+
+            if (statusInfo.lastActuationUuid && !hasCausal) {
+                visualizeTrace(statusInfo.lastActuationUuid);
+            }
         }
 
         function visualizeTrace(uuid) {
@@ -610,11 +672,14 @@
         function highlightTraceOnGraph(trace) {
             if (!cy) return;
             
+            // Fade out everything first
+            cy.elements().addClass('faded-trace');
+            
             if (trace.nodes) {
                 trace.nodes.forEach(n => {
                     const el = cy.getElementById(n.namespace);
                     if (el) {
-                        el.addClass('highlighted-trace');
+                        el.removeClass('faded-trace').addClass('highlighted-trace');
                     }
                 });
             }
@@ -629,9 +694,11 @@
                     const childNs = uuidToNs[e.childUuid];
                     const parentNs = uuidToNs[e.parentUuid];
                     if (childNs && parentNs) {
-                        cy.edges().forEach(cyEdge => {
-                            if (cyEdge.source().id() === parentNs && cyEdge.target().id() === childNs) {
-                                cyEdge.addClass('highlighted-trace');
+                        const matchingEdges = cy.edges(`edge[source="${parentNs}"][target="${childNs}"]`);
+                        matchingEdges.forEach(cyEdge => {
+                            // Highlight if variable matches, or if no variables are specified in the trace edge (fallback)
+                            if (!e.variableNames || e.variableNames.length === 0 || e.variableNames.includes(cyEdge.data('label'))) {
+                                cyEdge.removeClass('faded-trace').addClass('highlighted-trace');
                             }
                         });
                     }
@@ -641,7 +708,7 @@
 
         function clearTraceHighlighting() {
             if (cy) {
-                cy.elements().removeClass('highlighted-trace');
+                cy.elements().removeClass('highlighted-trace faded-trace');
             }
             const traceList = document.getElementById('trace-list-panel');
             if (traceList) traceList.remove();

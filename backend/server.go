@@ -1074,7 +1074,7 @@ func (s *Server) debounceSucceeded(ns string, varName string, changed bool, actU
 		s.mu.Unlock()
 
 		if currentActUUID != "" {
-			if err := s.store.UpdateActuationStatus(context.Background(), currentActUUID, "completed"); err != nil {
+			if err := s.store.UpdateActuationStatus(context.Background(), currentActUUID, ActuationStatusCompleted); err != nil {
 				log.Printf("[WARNING] failed to update actuation %s status to completed: %v", currentActUUID, err)
 			}
 		}
@@ -1317,8 +1317,9 @@ func (s *Server) processCompletionHooks(ctx context.Context) {
 
 	for _, r := range roots {
 		age := now.Sub(r.CreatedAt)
+		var status ActuationStatus
 		if age > maxAge {
-			completed = append(completed, CompletedActuation{UUID: r.UUID, Status: ActuationStatusStale})
+			status = ActuationStatusStale
 		} else {
 			isComplete, err := s.store.IsCascadeComplete(ctx, r.UUID)
 			if err != nil {
@@ -1326,8 +1327,16 @@ func (s *Server) processCompletionHooks(ctx context.Context) {
 				continue
 			}
 			if isComplete {
-				completed = append(completed, CompletedActuation{UUID: r.UUID, Status: ActuationStatusCompleted})
+				status = ActuationStatusCompleted
 			}
+		}
+
+		if status != "" {
+			if err := s.store.UpdateActuationStatus(ctx, r.UUID, status); err != nil {
+				log.Printf("[WARNING] failed to update database status for root actuation %s to %s: %v", r.UUID, status, err)
+				continue
+			}
+			completed = append(completed, CompletedActuation{UUID: r.UUID, Status: status})
 		}
 	}
 
