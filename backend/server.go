@@ -150,7 +150,7 @@ func (s *Server) RegisterNamespace(ctx context.Context, req *pb.RegisterNamespac
 		UUID:      uuidStr,
 		Namespace: ns.Name,
 		Source:    "organic",
-		Status:    "actuating",
+		Status:    ActuationStatusActuating,
 		CreatedAt: s.clock.Now(),
 	}
 	if err := s.store.CreateActuation(ctx, act, nil); err != nil {
@@ -179,7 +179,7 @@ func (s *Server) StartActuation(ctx context.Context, req *pb.StartActuationReque
 		UUID:      uuidStr,
 		Namespace: ns,
 		Source:    "organic",
-		Status:    "actuating",
+		Status:    ActuationStatusActuating,
 		CreatedAt: s.clock.Now(),
 	}
 	if err := s.store.CreateActuation(ctx, act, req.GetParentActuationUuids()); err != nil {
@@ -210,7 +210,7 @@ func (s *Server) GetActuationTrace(ctx context.Context, req *pb.GetActuationTrac
 			Uuid:      n.UUID,
 			Namespace: n.Namespace,
 			Source:    n.Source,
-			Status:    n.Status,
+			Status:    string(n.Status),
 			Timestamp: n.CreatedAt.Unix(),
 		}
 	}
@@ -865,7 +865,7 @@ func (s *Server) promoteTriggerToActuation(ctx context.Context, triggerUUID, nam
 		UUID:      triggerUUID,
 		Namespace: namespace,
 		Source:    "webhook",
-		Status:    "triggered",
+		Status:    ActuationStatusTriggered,
 		CreatedAt: s.clock.Now(),
 	}
 	if err := s.store.CreateActuation(ctx, act, parents); err != nil {
@@ -1192,7 +1192,7 @@ func (s *Server) handleTimeouts(ctx context.Context) {
 	}
 
 	for _, u := range uuidsToComplete {
-		if err := s.store.UpdateActuationStatus(ctx, u, "completed"); err != nil {
+		if err := s.store.UpdateActuationStatus(ctx, u, ActuationStatusCompleted); err != nil {
 			log.Printf("[WARNING] failed to update database status for timed out actuation %s: %v", u, err)
 		}
 	}
@@ -1264,8 +1264,8 @@ func (s *Server) calculateStatuses(ctx context.Context, namespaces []string) (ma
 }
 
 type CompletedActuation struct {
-	UUID   string `json:"uuid"`
-	Status string `json:"status"`
+	UUID   string          `json:"uuid"`
+	Status ActuationStatus `json:"status"`
 }
 
 type CompletionWebhookPayload struct {
@@ -1318,7 +1318,7 @@ func (s *Server) processCompletionHooks(ctx context.Context) {
 	for _, r := range roots {
 		age := now.Sub(r.CreatedAt)
 		if age > maxAge {
-			completed = append(completed, CompletedActuation{UUID: r.UUID, Status: "stale"})
+			completed = append(completed, CompletedActuation{UUID: r.UUID, Status: ActuationStatusStale})
 		} else {
 			isComplete, err := s.store.IsCascadeComplete(ctx, r.UUID)
 			if err != nil {
@@ -1326,7 +1326,7 @@ func (s *Server) processCompletionHooks(ctx context.Context) {
 				continue
 			}
 			if isComplete {
-				completed = append(completed, CompletedActuation{UUID: r.UUID, Status: "completed"})
+				completed = append(completed, CompletedActuation{UUID: r.UUID, Status: ActuationStatusCompleted})
 			}
 		}
 	}
@@ -1384,7 +1384,7 @@ func (s *Server) transitionStaleRootActuations(ctx context.Context, roots []*Act
 		age := now.Sub(r.CreatedAt)
 		if age > maxAge {
 			log.Printf("[INFO] Transitioning stale unnotified root actuation %s to 'stale' status", r.UUID)
-			if err := s.store.SetActuationNotified(ctx, r.UUID, "stale"); err != nil {
+			if err := s.store.SetActuationNotified(ctx, r.UUID, ActuationStatusStale); err != nil {
 				log.Printf("[ERROR] failed to update stale actuation status: %v", r.UUID)
 			}
 		}

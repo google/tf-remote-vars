@@ -37,11 +37,21 @@ type Variable struct {
 }
 
 // Actuation represents an actuation run.
+type ActuationStatus string
+
+const (
+	ActuationStatusTriggered ActuationStatus = "triggered"
+	ActuationStatusActuating ActuationStatus = "actuating"
+	ActuationStatusCompleted ActuationStatus = "completed"
+	ActuationStatusStale     ActuationStatus = "stale"
+	ActuationStatusFailed    ActuationStatus = "failed"
+)
+
 type Actuation struct {
 	UUID      string
 	Namespace string
 	Source    string // "organic" or "webhook"
-	Status    string // "triggered", "actuating", "completed", "failed"
+	Status    ActuationStatus
 	CreatedAt time.Time
 }
 
@@ -110,14 +120,14 @@ type Store interface {
 
 	// Actuations
 	CreateActuation(ctx context.Context, act *Actuation, parentUUIDs []string) error
-	UpdateActuationStatus(ctx context.Context, uuid string, status string) error
+	UpdateActuationStatus(ctx context.Context, uuid string, status ActuationStatus) error
 	GetActuation(ctx context.Context, uuid string) (*Actuation, error)
 	GetActuationParents(ctx context.Context, uuid string) ([]string, error)
 	GetLastActuation(ctx context.Context, namespace string) (*Actuation, error)
 	GetActuationTrace(ctx context.Context, startUUID string) ([]*Actuation, []*LineageEdge, error)
 	GetUnnotifiedRootActuations(ctx context.Context) ([]*Actuation, error)
 	IsCascadeComplete(ctx context.Context, rootUUID string) (bool, error)
-	SetActuationNotified(ctx context.Context, uuid string, status string) error
+	SetActuationNotified(ctx context.Context, uuid string, status ActuationStatus) error
 
 	// Affected namespaces tracking
 	RecordAffectedNamespace(ctx context.Context, ns string, causalUUIDs []string) error
@@ -724,7 +734,7 @@ func (s *SQLiteStore) CreateActuation(ctx context.Context, act *Actuation, paren
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) UpdateActuationStatus(ctx context.Context, uuid string, status string) error {
+func (s *SQLiteStore) UpdateActuationStatus(ctx context.Context, uuid string, status ActuationStatus) error {
 	_, err := s.db.ExecContext(ctx, "UPDATE actuations SET status = ? WHERE uuid = ?", status, uuid)
 	if err != nil {
 		return fmt.Errorf("failed to update actuation status: %w", err)
@@ -1070,7 +1080,7 @@ func (s *SQLiteStore) IsCascadeComplete(ctx context.Context, rootUUID string) (b
 }
 
 // SetActuationNotified marks the root actuation status as completed/stale and notified.
-func (s *SQLiteStore) SetActuationNotified(ctx context.Context, uuid string, status string) error {
+func (s *SQLiteStore) SetActuationNotified(ctx context.Context, uuid string, status ActuationStatus) error {
 	_, err := s.db.ExecContext(ctx, "UPDATE actuations SET status = ?, completion_notified = 1 WHERE uuid = ?;", status, uuid)
 	if err != nil {
 		return fmt.Errorf("failed to set actuation notified: %w", err)
